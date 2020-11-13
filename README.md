@@ -1,4 +1,4 @@
 # VolMemLyzer
 Volatility Memory Analyzer
 
-We used [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE.
+This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE.
