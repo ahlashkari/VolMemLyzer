@@ -1,0 +1,2 @@
+pslist.nproc,pslist.nppid,pslist.avg_threads,pslist.nprocs64bit,dlllist.ndlls,dlllist.avg_dlls_per_proc,handles.nhandles,handles.avg_handles_per_proc,ldrmodules.not_in_load,ldrmodules.not_in_init,ldrmodules.not_in_mem,malfind.ninjections
+17,8,17.470588235294116,0,739,43.470588235294116,4448,261.6470588235294,2,18,2,12
