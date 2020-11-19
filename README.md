@@ -3,36 +3,36 @@
 Volatility Memory Analyzer: A python code to extract more than 30 features to analyze the malicious activities in a memory snapshot using Volatility tool.   
 
  
-# VolatilityFeatureExtractor (First Package)
+## VolatilityFeatureExtractor (First Package)
 
 This is the feature extraction module which use Volatility plugins to extract features and will generate a CSV file as the output.  
 
-# Analyzer (Second Package)
-TBD
-
-# Prerequisites and execution 
+### Prerequisites and execution 
 
 For Kali Linux, install volatility via apt:
-
+```
 sudo apt install volatility 
-
+```
 For other Linux distributions, look for corresponding built-in software repositories, or install https://github.com/volatilityfoundation/volatility from source code. 
 
 Running VolatilityFeatureExtractor 
-
+```
 python VolatilityFeatureExtractor.py <path-to-memory-dump> 
+```
 
+## Analyzer (Second Package)
+TBD
 
-# Contributing 
+### Contributing 
 The project is currently in development, but any contribution is welcome in form of pull requests. 
 
 
-#License  
+### License  
 This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE. 
 
  
 
-## Project Team members 
+### Project Team members 
 
 * [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Owner 
 
@@ -42,5 +42,5 @@ This package is using [**Volatility**](https://github.com/volatilityfoundation/v
 
  
 
-## Acknowledgement 
+### Acknowledgement 
 This project has been made possible through funding from the NSERC-Discovery from 2020 to 2025. 
