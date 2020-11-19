@@ -13,11 +13,13 @@ TBD
 # Prerequisites and execution 
 
 For Kali Linux, install volatility via apt:
+
 sudo apt install volatility 
 
 For other Linux distributions, look for corresponding built-in software repositories, or install https://github.com/volatilityfoundation/volatility from source code. 
 
 Running VolatilityFeatureExtractor 
+
 python VolatilityFeatureExtractor.py <path-to-memory-dump> 
 
 
