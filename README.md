@@ -32,7 +32,7 @@ This package is using [**Volatility**](https://github.com/volatilityfoundation/v
 
 ## Project Team members 
 
-* [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Leader 
+* [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Owner 
 
 * [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Research 
 
