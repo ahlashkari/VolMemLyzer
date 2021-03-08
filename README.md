@@ -36,9 +36,9 @@ This package is using [**Volatility**](https://github.com/volatilityfoundation/v
 
 * [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Owner 
 
-* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Research 
+* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher
 
-* [**Beiqi Li:**](https://github.com/beiqil) Development 
+* [**Beiqi Li:**](https://github.com/beiqil) Developer 
 
  
 
