@@ -1,4 +1,4 @@
-We are using  [**Volatility:**](https://github.com/volatilityfoundation/volatility) and following their LICENSE which is: 
+We are using  [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE which is: 
 
 ## GNU General Public License v2.0
 
