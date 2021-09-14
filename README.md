@@ -51,7 +51,7 @@ Arash Habibi Lashkari, Beiqi Li, Tristan Lucas Carrier, Gurdip Kaur, VolMemLyzer
 
 * [**Beiqi Li:**](https://github.com/beiqil) Developer 
 
-* [**Tristan Carrier:**](https://github.com/TristanCarrier)
+* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer
 
 ### Acknowledgement 
-This project has been made possible through funding from the NSERC-Discovery from 2020 to 2025. 
+This project has been made possible through funding from the NSERC-Discovery from 2021 to 2026. 
