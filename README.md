@@ -47,11 +47,11 @@ Arash Habibi Lashkari, Beiqi Li, Tristan Lucas Carrier, Gurdip Kaur, VolMemLyzer
 
 * [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Owner 
 
-* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher
-
 * [**Beiqi Li:**](https://github.com/beiqil) Developer 
 
 * [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer
+
+* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow) 
 
 ### Acknowledgement 
 This project has been made possible through funding from the NSERC-Discovery from 2021 to 2026. 
