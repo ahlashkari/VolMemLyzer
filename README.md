@@ -97,7 +97,7 @@ For citation in your works and also understanding VolMemLyzer completely, you ca
 
 ### Project Team members 
 
-* [**Arash Habibi Lashkari:**](https://www.cs.unb.ca/~alashkar/) Founder and Project Owner 
+* [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner 
 
 * [**Beiqi Li:**](https://github.com/beiqil) Developer 
 
