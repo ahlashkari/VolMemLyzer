@@ -90,9 +90,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
  
 For citation in your works and also understanding VolMemLyzer completely, you can find below published papers:
 
-Arash Habibi Lashkari, Beiqi Li, Tristan Lucas Carrier, Gurdip Kaur, "VolMemLyzer: Volatile Memory Analyzer for Malware Classification using Feature Engineering", Reconciling Data Analytics, Automation, Privacy, and Security: A Big Data Challenge (RDAAPS), IEEE 978-1-7281-6937-8/20, Canada, ON, McMaster University, 2021
+- Arash Habibi Lashkari, Beiqi Li, Tristan Lucas Carrier, Gurdip Kaur, "VolMemLyzer: Volatile Memory Analyzer for Malware Classification using Feature Engineering", Reconciling Data Analytics, Automation, Privacy, and Security: A Big Data Challenge (RDAAPS), IEEE 978-1-7281-6937-8/20, Canada, ON, McMaster University, 2021
 
-Tristan Carrier, Princy Victor, Ali Tekeoglu, Arash Habibi Lashkari, "Detecting Obfuscated Malware Using Memory Feature Engineering", The 8th International Conference on Information Systems Security and Privacy (ICISSP), 2022
+- Tristan Carrier, Princy Victor, Ali Tekeoglu, Arash Habibi Lashkari, "Detecting Obfuscated Malware Using Memory Feature Engineering", In the proceeding of the 8th International Conference on Information Systems Security and Privacy (ICISSP), 2022
+
 
 ### Project Team members 
 
