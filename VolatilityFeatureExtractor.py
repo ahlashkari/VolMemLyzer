@@ -171,8 +171,8 @@ def extract_apihooks_features(jsondump):
     apihooks = rc2kv(json.load(jsondump))    
     return {
 	'apihooks.nhooks': len(apihooks),
-	'apihooks.nhooksInline': sum(1 if s['HookType'] == 'Inline/Trampoline' else 0 #for s in apihooks),
-	'apihooks.nhooksUsermode': sum(1 if s['HookMode'] == 'Usermode' else 0 for s in #apihooks),
+	'apihooks.nhooksInline': sum(1 if s['HookType'] == 'Inline/Trampoline' else 0 for s in apihooks),
+	'apihooks.nhooksUsermode': sum(1 if s['HookMode'] == 'Usermode' else 0 for s in apihooks),
     }
 
 
