@@ -211,7 +211,7 @@ def rc2kv(rc):
 def invoke_volatility(volatility_exe, memdump_path, module, output_to):
     subprocess.run([volatility_exe, '-f', memdump_path, '--output=json', '--profile=Win7SP1x86', '--output-file', output_to, '--', module], check=True)
 
-# Pls find your OS profile and replace in this tag '--profile=Win7SP1x86' or remove it if you want to use the general profile (which we are not recommending)
+# Pls find your OS profile and replace in this tag '--profile=Win7SP1x86' and be sure that Volatility will support the listed features in your particular profile
 
 def extract_all_features_from_memdump(memdump_path, output_to, volatility_exe):
     features = {}
