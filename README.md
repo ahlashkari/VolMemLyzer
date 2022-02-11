@@ -3,7 +3,10 @@
 
 Memory forensics is a fundamental step that inspects malicious activities during live malware infection. Memory analysis not only captures malware footprints but also collects several essential features that may be used to extract hidden original code from obfuscated malware. There are significant efforts in analyzing volatile memory using several tools and approaches. These approaches fetch relevant information from the kernel and user space of the operating system to investigate running malware. However, the fetching process will accelerate if the most dominating features required for malware classification are readily available. Volatility Memory Analyzer (VolMemLyzer) is a python code to extract more than 36 features to analyze the malicious activities in a memory snapshot using Volatility tool.   
 
- 
+## Example 
+python3 VolatilityFeatureExtractor.py -o output.csv memdump_name.raw
+
+
 ## VolatilityFeatureExtractor (First Version)
 
 This is the feature extraction module which use Volatility plugins to extract features and will generate a CSV file as the output.  
