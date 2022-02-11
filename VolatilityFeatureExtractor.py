@@ -211,6 +211,8 @@ def rc2kv(rc):
 def invoke_volatility(volatility_exe, memdump_path, module, output_to):
     subprocess.run([volatility_exe, '-f', memdump_path, '--output=json', '--output-file', output_to, '--', module], check=True)
 
+# To use a specific profile, add the following code after the --output=json tag: , '--profile=(Profile name)'
+
 def extract_all_features_from_memdump(memdump_path, output_to, volatility_exe):
     features = {}
     if output_to is None:
