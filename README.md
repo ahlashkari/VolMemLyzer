@@ -102,9 +102,9 @@ For citation in your works and also understanding VolMemLyzer completely, you ca
 
 * [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner 
 
-* [**Beiqi Li:**](https://github.com/beiqil) Developer 
+* [**Beiqi Li:**](https://github.com/beiqil) Developer (Python 2.7)
 
-* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer
+* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer (Python 2.7)
 
 * [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow) 
 
