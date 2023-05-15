@@ -7,7 +7,7 @@ When distributing derived works, the source code of the work must be made availa
 There are multiple variants of the GNU GPL, each with different requirements.
 
 ### For citation in your works and also understanding VolMEmLyzer completely, you must use below published paper:
-
+```
 @INPROCEEDINGS{9452028,
   author={Lashkari, Arash Habibi and Li, Beiqi and Carrier, Tristan Lucas and Kaur, Gurdip},
   booktitle={2021 Reconciling Data Analytics, Automation, Privacy, and Security: A Big Data Challenge (RDAAPS)}, 
@@ -17,4 +17,4 @@ There are multiple variants of the GNU GPL, each with different requirements.
   number={},
   pages={1-8},
   doi={10.1109/RDAAPS48126.2021.9452028}}
-
+```
