@@ -6,7 +6,7 @@ The GNU GPL is the most widely used free software license and has a strong copyl
 When distributing derived works, the source code of the work must be made available under the same license. 
 There are multiple variants of the GNU GPL, each with different requirements.
 
-# For citation in your works and also understanding VolMEmLyzer completely, you must use below published paper:
+### For citation in your works and also understanding VolMEmLyzer completely, you must use below published paper:
 
 @INPROCEEDINGS{9452028,
   author={Lashkari, Arash Habibi and Li, Beiqi and Carrier, Tristan Lucas and Kaur, Gurdip},
