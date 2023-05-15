@@ -104,7 +104,15 @@ For citation in your works and also understanding VolMemLyzer completely, you ca
   doi={10.1109/RDAAPS48126.2021.9452028}}
 ```
 
-- Tristan Carrier, Princy Victor, Ali Tekeoglu, Arash Habibi Lashkari, "Detecting Obfuscated Malware Using Memory Feature Engineering", In the proceeding of the 8th International Conference on Information Systems Security and Privacy (ICISSP), 2022
+```
+@inproceedings{carrier2022detecting,
+  title={Detecting Obfuscated Malware using Memory Feature Engineering.},
+  author={Carrier, Tristan and Victor, Princy and Tekeoglu, Ali and Lashkari, Arash Habibi},
+  booktitle={ICISSP},
+  pages={177--188},
+  year={2022}
+}
+```
 
 
 ### Project Team members 
