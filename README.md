@@ -7,7 +7,7 @@ Memory forensics is a fundamental step that inspects malicious activities during
 python3 VolatilityFeatureExtractor.py -o output.csv memdump_name.raw
 
 
-## Volatility Feature Extractor (First Version)
+## Volatility Feature Extractor (VolMemLyzer-V1)
 
 This is the feature extraction module which use Volatility plugins to extract features and will generate a CSV file as the output.  
 
@@ -80,6 +80,10 @@ Apihooks - nhookInLine - Total number of in line apihooks
 Apihooks - nhooksInUsermode - Total number of apihooks in user mode
 
 
+## Volatility Feature Extractor (VolMemLyzer-V2)
+
+
+
 ### License  
 This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE. 
 
@@ -91,7 +95,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  
-For citation in your works and also understanding VolMemLyzer completely, you can find below published papers:
+For citation in your works and also understanding VolMemLyzer-V1 completely, you can find below published papers:
 ```
 @INPROCEEDINGS{9452028,
   author={Lashkari, Arash Habibi and Li, Beiqi and Carrier, Tristan Lucas and Kaur, Gurdip},
