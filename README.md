@@ -11,7 +11,7 @@ Memory forensics is a fundamental step that inspects malicious activities during
 
 ## Volatility Feature Extractor (VolMemLyzer-V0)
 
-This is the feature extraction module which use Volatility plugins to extract features and will generate a CSV file as the output.  
+VolMEmLyzer-V0 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
 
 ### Prerequisites and execution 
 
@@ -62,7 +62,7 @@ Apihooks - nhooksInUsermode - Total number of apihooks in user mode
 ### License  
 This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE. 
 
-## Copyright (c) 2020/2023 
+## Copyright (c) 2020
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (VolMemLyzer), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
