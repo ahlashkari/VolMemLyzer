@@ -31,31 +31,57 @@ python3 VolatilityFeatureExtractor.py -o output.csv memdump_name.raw
 
 ### Features 
 The memory feature extractor for learning-based solutions with the 26 new features implemented to target obfuscated and hidden malware.
+
 Malfind - commitCharge - Total number of Commit Charges
+
 Malfind - protection - Total number of protection
+
 Malfind - uniqueInjections - Total number of unique injections
+
 Ldrmodule - avgMissingFromLoad - The average amount of modules missing from the load list
+
 Ldrmodule - avgMissingFromInit - The average amount of modules missing from the initilization list
+
 Ldrmodule - avgMissingFromMem - The average amount of modules missing from memory
+
 Handles - port - Total number of port handles
+
 Handles - file - Total number of file handles
+
 Handles - event - Total number of event handles
+
 Handles - desktop - Total number of desktop handles
+
 Handles - key - Total number of key handles
+
 Handles - thread - Total number of thread handles
+
 Handles - directory - Total number of directory handles
+
 Handles - semaphore - Total number of semaphore handles
+
 Handles - timer - Total number of timer handles
+
 Handles - section - Total number of section handles
+
 Handles - mutant - Total number of mutant handles
+
 Process View - pslist - Average false ratio of the process list
+
 Process View - psscan - Average false ratio of the process scan
+
 Process View - thrdproc - Average false ratio of the third process
+
 Process View - pspcid - Average false ratio of the process id
+
 Process View - session - Average false ratio of the session
+
 Process View - deskthrd - Average false ratio of the deskthrd
+
 Apihooks - nhooks - Total number of apihooks
+
 Apihooks - nhookInLine - Total number of in line apihooks
+
 Apihooks - nhooksInUsermode - Total number of apihooks in user mode
 
 
