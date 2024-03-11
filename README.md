@@ -9,9 +9,9 @@ Memory forensics is a fundamental step that inspects malicious activities during
 
 
 
-## Volatility Feature Extractor (VolMemLyzer-V0)
+## Volatility Feature Extractor (VolMemLyzer-V1)
 
-VolMEmLyzer-V0 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
+VolMEmLyzer-V1 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
 
 ### Prerequisites and execution 
 
