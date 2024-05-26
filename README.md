@@ -120,7 +120,7 @@ For citation in your works and also understanding VolMemLyzer-V0 completely, you
 ```
 
 
-### VolMemLyzer-V0 Team members 
+### VolMemLyzer-V1 Team members 
 
 * [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner 
 
