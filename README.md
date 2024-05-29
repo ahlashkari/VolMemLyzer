@@ -52,6 +52,315 @@ The Placeholders should strictly follow:
 
 ### Features 
 Here is the list of features that VolMemLyzer V2.0.0 will stract from each memory snapshot:
+1. mem name
+	- mem.name_extn
+2. info
+  	- info.Is64
+	- info.winBuild
+	- info.npro	
+	- info.IsPAE	
+3. PsList
+	- pslist.nproc	
+	- pslist.nppid	
+	- pslist.avg_threads	
+	- pslist.avg_handlers	
+	- pslist.nprocs64bit	
+	- pslist.outfile
+4. DLLList	
+	- dlllist.ndlls	
+	- dlllist.nproc_dll	
+	- dlllist.avg_dllPerProc	
+	- dlllist.avgSize	
+	- dlllist.outfile	
+5. Handles
+	- handles.nHandles	
+	- handles.distinctHandles	
+	- handles.nproc	
+	- handles.nAccess	
+	- handles.avgHandles_per_proc	
+	- handles.nTypePort	
+	- handles.nTyepProc	
+	- handles.nTypeThread	
+	- handles.nTypeKey	
+	- handles.nTypeEvent	
+	- handles.nTypeFile	
+	- handles.nTypeDir	
+	- handles.nTypeSec	
+	- handles.nTypeDesk	
+	- handles.nTypeToken	
+	- handles.nTypeMutant	
+	- handles.nTypeKeyEvent	
+	- handles.nTypeSymLink	
+	- handles.nTypeSemaph	
+	- handles.nTypeWinSta	
+	- handles.nTypeTimer	
+	- handles.nTypeIO	
+	- handles.nTypeWmi	
+	- handles.nTypeWaitPort	
+	- handles.nTypeJob	
+	- handles.nTypeUnknown	
+6. Idr Modules
+	- ldrmodules.total	
+	- ldrmodules.not_in_load	
+	- ldrmodules.not_in_init	
+	- ldrmodules.not_in_mem	
+	- ldrmodules.nporc	
+	- ldrmodules.not_in_load_avg	
+	- ldrmodules.not_in_init_avg	
+	- ldrmodules.not_in_mem_avg	
+7. MalFind
+	- malfind.ninjections	
+	- malfind.commitCharge	
+	- malfind.protection	
+	- malfind.uniqueInjections	
+	- malfind.avgInjec_per_proc	
+	- malfind.tagsVad	
+	- malfind.tagsVads	
+	- malfind.aveVPN_diff	
+	- modules.nmodules	
+	- modules.avgSize	
+	- modules.FO_enabled	
+
+8. Call Backs
+	- callbacks.ncallbacks	
+	- callbacks.nNoDetail	
+	- callbacks.nBugCheck	
+	- callbacks.nBugCheckReason	
+	- callbacks.nCreateProc	
+	- callbacks.nCreateThread	
+	- callbacks.nLoadImg	
+	- callbacks.nRegisterCB	
+	- callback.nUnknownType	
+
+9. CMD Line
+	- cmdline.nLine	
+	- cmdline.not_in_C	
+	- cmdline.n_exe	
+	- cmdline.n_bin	
+
+10. Device Tree
+	- devicetree.ndevice	
+	- devicetree.nTypeNotDRV	
+
+11. Driverirp (Driver IRP hook detection)
+	- driverirp.nIRP	
+	- driverirp.nModules	
+	- driverirp.nSymbols	
+	- driverirp.n_diff_add	
+	- drivermodule.nModules	
+	- driverscan.nscan	
+	- driverscan.avgSize	
+12. envars (Display process environment variables)
+	- envars.nVars	
+	- envars.nProc	
+	- envars.nBlock	
+	- envars.n_diff_var	
+	- envars.nValue	
+13. File Scan
+	- filescan.nFiles	
+	- filescan.n_diff_file	
+14. getsid (The SIDs owning each process)
+	- getsids.nSIDcalls	
+	- getsids.nProc	
+	- getsids.nDiffName	
+	- getsids.n_diff_sids	
+	- getsids.avgSIDperProc	
+15. MBRScan (Scans Master Boot Records (MBRs))
+	- mbrscan.nMBRentries	
+	- mbrscan.nDiskSig	
+	- mbrscan.nPartType	
+	- mbrscan.bootable	
+
+16. MFTScan (Scan for potential MFT entries)
+	- mftscan.nEntriesMFT	
+	- mftscan.nAttributeType	
+	- mftscan.nRecordType	
+	- mftscan.AvgRecordNum	
+	- mftscan.AvgLinkCount	
+	- mftscan.0x9_typeMFT	
+	- mftscan.0xd_typeMFT	
+	- mftscan.DirInUse_typeMFT	
+	- mftscan.Removed_typeMFT	
+	- mftscan.File_typeMFT	
+	- mftscan.Other_typeMFT	
+	- mftscan.AvgChildren	
+
+17. ModScan (Pool scanner for kernel modules)
+	- modscan.nMod	
+	- modscan.nUniqueExt	
+	- modscan.nDLL	
+	- modscan.nSYS	
+	- modscan.nEXE	
+	- modscan.nOthers	
+	- modscan.AvgSize	
+	- modscan.MeanChildExist	
+	- modscan.FO_Enabled	
+
+18.mutanscan (Pool scanner for mutex objects) 
+	- mutantscan.nMutantObjects	
+	- mutantscan.nNamedMutant	
+
+19. net scan (Scan a Vista (or later) image for connections and sockets)
+	- netscan.nConn	
+	- netscan.nDistinctForeignAdd	
+	- netscan.nDistinctForeignPort	
+	- netscan.nDistinctLocalAddr	
+	- netscan.nDistinctLocalPort	
+	- netscan.nOwners	
+	- netscan.nDistinctProc	
+	- netscan.nListening	
+	- netscan.Proto_TCPv4	
+	- netscan.Proto_TCPv6	
+	- netscan.Proto_UDPv4	
+	- netscan.Proto_UDPv6	
+
+20. netstat (network active connections)
+	- netstat.nConn	
+	- netstat.nDistinctForeignAdd	
+	- netstat.nUnexpectForeignAdd	
+	- netstat.nDistinctLocalAddr	
+	- netstat.nUnexpectLocalAddr	
+	- netstat.nDistinctLocalPort	
+	- netstat.nOwners	
+	- netstat.nDistinctProc	
+	- netstat.nListening	
+	- netstat.nEstablished	
+	- netstat.nClose_wait	
+	- netstat.Proto_TCPv4	
+	- netstat.Proto_TCPv6	
+	- netstat.Proto_UDPv4	
+	- netstat.Proto_UDPv6	
+	- netstat.nNaNPID	
+
+21. Pool Scanner
+	- poolscanner.nPool	
+	- poolscanner.nUniquePool	
+
+22. Privileges
+	- privileges.nTotal	
+	- privileges.nUniquePrivilege	
+	- privileges.nPID	
+	- privileges.nProcess	
+	- privileges.nAtt_D	
+	- privileges.nAtt_P	
+	- privileges.nAtt_PE	
+	- privileges.nAtt_PED	
+	- privileges.nAtt_NaN	
+
+23. PSTree (process list as a tree)
+	- pstree.nTree	
+	- pstree.nHandles	
+	- pstree.nPID	
+	- pstree.nPPID	
+	- pstree.AvgThreads	
+	- pstree.nWow64	
+	- pstree.AvgChildren	
+
+24. Registry
+	- registry.certificates.nCert	
+	- registry.certificates.nID_Auto	
+	- registry.certificates.nID_Protected	
+	- registry.certificates.nID_Others	
+	- registry.hivelist.nFiles	
+	- registry.hivelist.nFO_Enabled	
+	- registry.hivescan.nHives	
+	- registry.hivescan.Children_exist	
+	- registry.printkey.nKeys	
+	- registry.printkey.nDistinct	
+	- registry.printkey.nType_key	
+	- registry.printkey.nType_other	
+	- registry.printkey.Volatile_0	
+	- registry.printkey.Avg_Children	
+	- registry.userassist.n	
+	- registry.userassist.nUnique	
+	- registry.userassist.Avg_Children	
+	- registry.userassist.path_DNE	
+	- registry.userassist.type_key	
+	- registry.userassist.type_other	
+
+25. Sessions (details on _MM_SESSION_SPACE (user logon sessions))
+	- sessions.nSessions	
+	- sessions.nProcess	
+	- sessions.nUsers	
+	- sessions.nType	
+	- sessions.Children_exist	
+
+26. Skeleton Key
+	- skeleton_key.nKey		
+	- skeleton_key.nProcess	
+	- skeleton_key.Found_True	
+	- skeleton_key.Found_False	
+
+27. ssdt (SSDT entries)
+	- ssdt.n	
+	- ssdt.nIndex	
+	- ssdt.nModules	
+	- ssdt.nSymbols	
+	- ssdt.Children_exist	
+
+28. Statistics
+	- statistics.Invalid_all	
+	- statistics.Invalid_large	
+	- statistics.Invalid_other	
+	- statistics.Swapped_all	
+	- statistics.Swapped_large	
+	- statistics.Valid_all	
+	- statistics.Valid_large	
+
+29. SVScan (Scan for Windows services)
+	- svcscan.nServices	
+	- svcscan.nUniqueServ	
+	- svcscan.State_Run	
+	- svcscan.State_Stop	
+	- svcscan.Start_Sys	
+	- svcscan.Start_Auto	
+	- svcscan.Type_Own_Share	
+	- svcscan.Type_Own	
+	- svcscan.Type_Share	
+	- svcscan.Type_Own_Interactive	
+	- svcscan.Type_Share_Interactive	
+	- svcscan.Type_Kernel_Driver	
+	- svcscan.Type_FileSys_Driver	
+	- svcscan.Type_Others	
+
+30. symlinksscan (Pool scanner for symlink objects)
+	- symlinkscan.nLinks	
+	- symlinkscan.nFrom	
+	- symlinkscan.nTo	
+	- symlinkscan.Avg_Children	
+
+31. vad info (Dump the VAD info)
+	- vadinfo.nEntries	
+	- vadinfo.nFile	
+	- vadinfo.nPID	
+	- vadinfo.nParent	
+	- vadinfo.nProcess	
+	- vadinfo.Process_Malware	
+	- vadinfo.Type_Vad	
+	- vadinfo.Type_VadS	
+	- vadinfo.Type_VadF	
+	- vadinfo.Type_VadI	
+	- vadinfo.Protection_RO	
+	- vadinfo.Protection_RW	
+	- vadinfo.Protection_NA	
+	- vadinfo.Protection_EWC	
+	- vadinfo.Protection_WC	
+	- vadinfo.Protection_ERW	
+	- vadinfo.Avg_Children	
+
+32. vadwalk (Walk the VAD tree)
+	- vadwalk.Avg_Size	
+
+33. ver info (version information from PE images)
+	- verinfo.nEntries	
+	- verinfo.nUniqueProg	
+	- verinfo.nPID	
+	- verinfo.Avg_Children	
+
+34. virtmap (virtual file in memory)
+	- virtmap.nEntries	
+	- virtmap.Avg_Offset_Size	
+	- virtmap.Avg_Children
 
 
 
