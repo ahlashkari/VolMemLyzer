@@ -1,102 +1,88 @@
-# VolMemLyzer (Volatile Memory Analyzer)
+
+# VolMemLyzer-V2.0.0
+[![GPLv3 License](https://img.shields.io/badge/License-GPL%20v3-yellow.svg)](https://opensource.org/licenses/) ![Static Badge](https://img.shields.io/badge/Tech_Stack-Volatility-red?link=https%3A%2F%2Fgithub.com%2Fvolatilityfoundation%2Fvolatility)
 
 
-Memory forensics is a fundamental step that inspects malicious activities during live malware infection. Memory analysis not only captures malware footprints but also collects several essential features that may be used to extract hidden original code from obfuscated malware. There are significant efforts in analyzing volatile memory using several tools and approaches. These approaches fetch relevant information from the kernel and user space of the operating system to investigate running malware. However, the fetching process will accelerate if the most dominating features required for malware classification are readily available. Volatile Memory Analyzer (VolMemLyzer) is a python project to extract memory features to analyze the malicious activities in a memory snapshot using Volatility tool. 
+Memory forensics is essential in cybersecurity and digital forensics, especially for fighting advanced threats and malware. In this dynamic environment, memory analysis tools and methods must be efficient. By prioritising the prominent features in a memory, investigators can speed up their analysis.
+The **VolMemLyzer** (Volatile Memory Analyzer) can extract over **250 features** from memory snapshots, speeding up analysis and enabling deeper explorations. It serves as a catalyst for memory forensics research and innovation.
+
+The new VolMemLyzer-V2 is a tool based on **functional programming paradigm** with dependencies on updated Volatility3 Framework based on python 3.
+
+## Extracted Features
+
+The taxonoy of the features produced by VolMemLyzer which based on plugin structure is summarised below using this interactive sunburst chart:
 
 
-  
+![Alt text](images/VolMemLyzerBurstGIF.gif)
 
+## Pre-requisites
 
+#### Volatility
 
-
-## Volatility Feature Extractor (VolMemLyzer-V1.0.0)
-
-VolMemLyzer-V1 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
-
-### Prerequisites and execution 
-
-For Kali Linux, install volatility via apt:
+For Linux, install **volatility** via apt:
+```bash
+  sudo apt install volatility 
 ```
-sudo apt install volatility 
-```
-For other Linux distributions, look for corresponding built-in software repositories, or install https://github.com/volatilityfoundation/volatility from source code. 
+For other Linux distributions, look for corresponding built-in software repositories, or install https://github.com/volatilityfoundation/volatility from source code.
+#### Other Pre-requisites
 
-Running VolatilityFeatureExtractor 
-```
-python VolatilityFeatureExtractor.py <path-to-memory-dump> 
+Out of all libraries used, only **pandas** library is not part of the Python standard library and must be installed separately using pip via:
+```bash
+  pip install pandas
 ```
 
-### Execution Example 
-python3 VolatilityFeatureExtractor.py -o output.csv memdump_name.raw
+
+## Deployment
+
+#### Step 1:
+Complete pre-requisites and download the VolMemLyzer script from above to the desired folder. Navigate to the folder where the script was downloaded and initiate terminal/powershell in the folder.
+
+#### Step 2:
+Use the command given below:
+
+```bash
+  python3 VolMemLyzer-V2.py -f <Path to Memory Dump Folder> -o <Path to Output Folder> -V <Path to Volatility3>
+```
+
+The Placeholders should strictly follow:
+- **Path to Memory Dump Folder** - This should be an absolute path to the folder containing memory dump files. Ex: */home/user1/Desktop/MemoryDumps*
+- **Path to Output Folder** - This should be an absolute path to the folder where the *output.csv* is to be stored. Ex: */home/user1/Desktop/VolMemLyzerOutput*
+- **Path to Volatility3** - This should be an absolute path to the *vol.py* file in the downloaded volatility folder from official Volatility3 Github. Ex: */home/user1/Desktop/Volatility3/vol.py*
+
 
 ### Features 
-The memory feature extractor for learning-based solutions with the 26 new features implemented to target obfuscated and hidden malware.
+Here is the list of features that VolMemLyzer V2.0.0 will stract from each memory snapshot:
 
-Malfind - commitCharge - Total number of Commit Charges
 
-Malfind - protection - Total number of protection
 
-Malfind - uniqueInjections - Total number of unique injections
+## Improvements (V2.0.0 vs V1.0.0)
+- Now supports 250+ features compared to less than 75 earlier.
+- Supports latest Volatility 3 Framework rather than outdated Volatility 2 Framework.
+- Now runs on python 3 rather than python 2.
+- Improved redundancy - Exception handling support if dataframe is not created or incorrectly created.
+- Improved computability with pandas.
+- Scope of types of files supported increased.
 
-Ldrmodule - avgMissingFromLoad - The average amount of modules missing from the load list
-
-Ldrmodule - avgMissingFromInit - The average amount of modules missing from the initilization list
-
-Ldrmodule - avgMissingFromMem - The average amount of modules missing from memory
-
-Handles - port - Total number of port handles
-
-Handles - file - Total number of file handles
-
-Handles - event - Total number of event handles
-
-Handles - desktop - Total number of desktop handles
-
-Handles - key - Total number of key handles
-
-Handles - thread - Total number of thread handles
-
-Handles - directory - Total number of directory handles
-
-Handles - semaphore - Total number of semaphore handles
-
-Handles - timer - Total number of timer handles
-
-Handles - section - Total number of section handles
-
-Handles - mutant - Total number of mutant handles
-
-Process View - pslist - Average false ratio of the process list
-
-Process View - psscan - Average false ratio of the process scan
-
-Process View - thrdproc - Average false ratio of the third process
-
-Process View - pspcid - Average false ratio of the process id
-
-Process View - session - Average false ratio of the session
-
-Process View - deskthrd - Average false ratio of the deskthrd
-
-Apihooks - nhooks - Total number of apihooks
-
-Apihooks - nhookInLine - Total number of in line apihooks
-
-Apihooks - nhooksInUsermode - Total number of apihooks in user mode
+NOTE: Future updates should include support for more third party plugins and better exception handling capabilities.
 
 
 ### License  
 This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE. 
 
-## Copyright (c) 2020
-
+## Copyright (c) 2020 and Citation
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (VolMemLyzer), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-For citation in your works and also understanding VolMemLyzer-V0 completely, you can find below published papers:
+
+For citation VolMemLyzer V2.0.0, in your works and also understanding it completely, you can find below published papers:
+
+
+
+For citation VolMemLyzer V1.0.0, in your works and also understanding it completely, you can find below published papers:
+
 ```
 @INPROCEEDINGS{9452028,
   author={Lashkari, Arash Habibi and Li, Beiqi and Carrier, Tristan Lucas and Kaur, Gurdip},
@@ -109,28 +95,16 @@ For citation in your works and also understanding VolMemLyzer-V0 completely, you
   doi={10.1109/RDAAPS48126.2021.9452028}}
 ```
 
-```
-@inproceedings{carrier2022detecting,
-  title={Detecting Obfuscated Malware using Memory Feature Engineering.},
-  author={Carrier, Tristan and Victor, Princy and Tekeoglu, Ali and Lashkari, Arash Habibi},
-  booktitle={ICISSP},
-  pages={177--188},
-  year={2022}
-}
-```
 
 
-### VolMemLyzer-V1.0.0 Team members 
+### Team members 
 
-* [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner 
-
-* [**Beiqi Li:**](https://github.com/beiqil) Developer (Python 2.7)
-
-* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer (Python 2.7)
-
-* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow) 
-
-### VolMemLyzer-V1 Acknowledgement 
-This project has been made possible through funding from the Natural Sciences and Engineering Research Council grant from Canada—NSERC (\#RGPIN-2020-04701)—to Arash Habibi Lashkari. 
+* [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner
+* [**Abhay Pratap Singh:**](https://github.com/Abhay-Sengar): Researcher and Developer (VolMemLyzer-V2.0.0)
+* [**Beiqi Li:**](https://github.com/beiqil) Developer (Python 2.7 - VolMemLyzer V1.0.0)
+* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer (Python 2.7 - VolMemLyzer V1.0.0)
+* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow - VolMemLyzer V1.0.0)
 
 
+### Acknowledgement 
+This project has been made possible through funding from the Natural Sciences and Engineering Research Council grant from Canada—NSERC (\#RGPIN-2020-04701)—to Arash Habibi Lashkari and Mitacs Global Research Internship (GRI) for the researchers. 
