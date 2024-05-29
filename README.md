@@ -1,7 +1,7 @@
-# VolMemLyzer (Volatility Memory Analyzer)
+# VolMemLyzer (Volatile Memory Analyzer)
 
 
-Memory forensics is a fundamental step that inspects malicious activities during live malware infection. Memory analysis not only captures malware footprints but also collects several essential features that may be used to extract hidden original code from obfuscated malware. There are significant efforts in analyzing volatile memory using several tools and approaches. These approaches fetch relevant information from the kernel and user space of the operating system to investigate running malware. However, the fetching process will accelerate if the most dominating features required for malware classification are readily available. Volatility Memory Analyzer (VolMemLyzer) is a python project to extract memory features to analyze the malicious activities in a memory snapshot using Volatility tool. 
+Memory forensics is a fundamental step that inspects malicious activities during live malware infection. Memory analysis not only captures malware footprints but also collects several essential features that may be used to extract hidden original code from obfuscated malware. There are significant efforts in analyzing volatile memory using several tools and approaches. These approaches fetch relevant information from the kernel and user space of the operating system to investigate running malware. However, the fetching process will accelerate if the most dominating features required for malware classification are readily available. Volatile Memory Analyzer (VolMemLyzer) is a python project to extract memory features to analyze the malicious activities in a memory snapshot using Volatility tool. 
 
 
   
@@ -9,9 +9,9 @@ Memory forensics is a fundamental step that inspects malicious activities during
 
 
 
-## Volatility Feature Extractor (VolMemLyzer-V1)
+## Volatility Feature Extractor (VolMemLyzer-V1.0.0)
 
-VolMEmLyzer-V1 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
+VolMemLyzer-V1 extracts 32 features from the volatile memory using Volatility plugins and generates a CSV file as the output.  
 
 ### Prerequisites and execution 
 
@@ -120,7 +120,7 @@ For citation in your works and also understanding VolMemLyzer-V0 completely, you
 ```
 
 
-### VolMemLyzer-V1 Team members 
+### VolMemLyzer-V1.0.0 Team members 
 
 * [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner 
 
