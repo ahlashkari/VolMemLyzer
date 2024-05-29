@@ -1,6 +1,6 @@
 
 # VolMemLyzer (Volatile Memory Analyzer)
-[![GPLv3 License](https://img.shields.io/badge/License-GPL%20v3-yellow.svg)](https://opensource.org/licenses/) ![Static Badge](https://img.shields.io/badge/Tech_Stack-Volatility-red?link=https%3A%2F%2Fgithub.com%2Fvolatilityfoundation%2Fvolatility)
+[![GPLv3 License](https://img.shields.io/badge/License-GPL%20v3-yellow.svg)](https://opensource.org/licenses/)
 
 
 Memory forensics is essential in cybersecurity and digital forensics, especially for fighting advanced threats and malware. In this dynamic environment, memory analysis tools and methods must be efficient. By prioritising the prominent features in a memory, investigators can speed up their analysis.
