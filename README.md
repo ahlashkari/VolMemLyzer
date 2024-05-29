@@ -131,6 +131,6 @@ For citation in your works and also understanding VolMemLyzer-V0 completely, you
 * [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow) 
 
 ### VolMemLyzer-V1 Acknowledgement 
-This project has been made possible through funding from the NSERC-Discovery from 2021 to 2026. 
+This project has been made possible through funding from the Natural Sciences and Engineering Research Council grant from Canada—NSERC (\#RGPIN-2020-04701)—to Arash Habibi Lashkari. 
 
 
