@@ -409,10 +409,11 @@ For citation VolMemLyzer V1.0.0, in your works and also understanding it complet
 ### Team members 
 
 * [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner
-* [**Abhay Pratap Singh:**](https://github.com/Abhay-Sengar): Researcher and Developer (VolMemLyzer-V2.0.0)
-* [**Beiqi Li:**](https://github.com/beiqil) Developer (Python 2.7 - VolMemLyzer V1.0.0)
-* [**Tristan Carrier:**](https://github.com/TristanCarrier) Researcher and developer (Python 2.7 - VolMemLyzer V1.0.0)
-* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Researcher (Postdoctorall fellow - VolMemLyzer V1.0.0)
+* [**Yassin Dehfuli:**](https://github.com/YaCnDehfuli): Master Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V3.0.0) 
+* [**Abhay Pratap Singh:**](https://github.com/Abhay-Sengar): Undergraduate Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V2.0.0)
+* [**Beiqi Li:**](https://github.com/beiqil) Undergraduate Student, Developer (Python 2.7 - VolMemLyzer V1.0.0)
+* [**Tristan Carrier:**](https://github.com/TristanCarrier) Master Student, Researcher, and developer (Python 2.7 - VolMemLyzer V1.0.0)
+* [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Postdoctorall Fellow Researcher (Python 2.0 - VolMemLyzer V1.0.0)
 
 
 ### Acknowledgement 
