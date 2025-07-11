@@ -7,6 +7,22 @@ VOL_MODULES = {
     'bigpools' : extractors.extract_bigpools_features,
     'cmdscan' : extractors.extract_cmdscan_features, 
     'joblinks': extractors.extract_joblinks_features,
+    'consoles' : extractors.extract_consoles_features,
+    'deskscan': extractors.extract_deskscan_features,
+    'getservicesids': extractors.extract_getservicesids_features,
+    'iat': extractors.extract_iat_features,
+    'modules': extractors.extract_modules_features,
+    'registry.hivelist': extractors.extract_hivelist_features,
+    'registry.certificates':extractors.extract_certificates_features,
+    'statistics': extractors.extract_statistics_features,
+    'unloadedmodules': extractors.extract_unloadedmodules_features,
+    'windowstations': extractors.extract_windowstations_features,
+    # 'windows.Windows': extractors.extract_windows_features,
+    'unhooked_system_calls': extractors.extract_unhooked_system_calls_features,
+    'svclist': extractors.extract_svclist_features,
+    # --------------------------------------------------
+
+    
 
 
     # 'shimcachemem.ShimcacheMem': extractors.extract_shimcache_features,

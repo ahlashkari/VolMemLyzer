@@ -1,9 +1,731 @@
 import pandas as pd
+import math
 import json
-from utils import shannon_entropy, _char_entropy, _flatten_records
+from utils import shannon_entropy, char_entropy, flatten_records, list_entropy
 from collections import Counter
+import re
 
 
+def extract_svclist_features(jsondump):
+    """
+    Pandas‐based extractor for windows.svclist JSON output.
+    """
+    df = pd.read_json(jsondump)
+    # Schema‐stable defaults
+    keys = [
+        "svclist.running_services_count",
+        "svclist.suspended_service_ratio",
+        "svclist.auto_start_services",
+        "svclist.svchost_share_process_count",
+        "svclist.custom_service_type_ratio",
+        "svclist.services_with_no_binary",
+    ]
+    if df.empty:
+        return {k: 0 if "count" in k or "services" in k else 0.0 for k in keys}
+
+    # 1) Total running services
+    running_services_count = int((df["State"] == "SERVICE_RUNNING").sum())
+
+    # 2) Suspended‐service ratio: of stopped services, how many are under svchost.exe
+    stopped = df[df["State"] == "SERVICE_STOPPED"]
+    if not stopped.empty:
+        suspended_service_ratio = float(
+            stopped["Binary"]
+            .str.lower()
+            .fillna("")
+            .str.contains("svchost.exe")
+            .mean()
+        )
+    else:
+        suspended_service_ratio = 0.0
+
+    # 3) Auto‐start services
+    auto_start_services = int((df["Start"] == "SERVICE_AUTO_START").sum())
+
+    # 4) svchost share‐process count
+    mask_share = (
+        df["Binary"].str.lower().fillna("").str.contains("svchost.exe")
+        & df["Type"].fillna("").str.contains("SHARE_PROCESS")
+    )
+    svchost_share_process_count = int(mask_share.sum())
+
+    # 5) Custom service types
+    standard = {
+        "SERVICE_WIN32_OWN_PROCESS",
+        "SERVICE_WIN32_SHARE_PROCESS",
+        "SERVICE_KERNEL_DRIVER",
+        "SERVICE_FILE_SYSTEM_DRIVER",
+    }
+    # Break multi‐type strings into sets, then test subset
+    types_series = (
+        df["Type"]
+        .fillna("")
+        .str.split("|")
+        .apply(lambda lst: {t.strip() for t in lst if t.strip()})
+    )
+    custom_count = int(types_series.apply(lambda s: not s.issubset(standard)).sum())
+    custom_service_type_ratio = custom_count / len(df)
+
+    # 6) Services with no Binary
+    services_with_no_binary = int(df["Binary"].isna().sum())
+
+    return {
+        "svclist.running_services_count": running_services_count,
+        "svclist.suspended_service_ratio": round(suspended_service_ratio, 4),
+        "svclist.auto_start_services": auto_start_services,
+        "svclist.svchost_share_process_count": svchost_share_process_count,
+        "svclist.custom_service_type_ratio": round(custom_service_type_ratio, 4),
+        "svclist.services_with_no_binary": services_with_no_binary,
+    }
+
+
+def extract_unhooked_system_calls_features(jsondump):
+    """
+    Extracts four metrics from windows.unhooked_system_calls JSON:
+      • syscalls.hooked_function_count  : # rows with non-empty 'Distinct Implementations'
+      • syscalls.userland_hook_ratio    : share of hooked rows where the hooker is a user-mode process
+      • syscalls.max_impl_discrepancy   : max(baseline_total_impls − Total Implementations)
+      • syscalls.hooked_entropy         : entropy of all implementer IDs (PID:PROC strings)
+    """
+    df = pd.read_json(jsondump)
+
+    # schema-stable defaults
+    if df.empty:
+        return {
+            'syscalls.hooked_function_count': 0,
+            'syscalls.userland_hook_ratio'  : 0.0,
+            'syscalls.max_impl_discrepancy' : 0,
+            'syscalls.hooked_entropy'       : 0.0,
+        }
+
+    # 1) Which functions were hooked at all?
+    di          = df['Distinct Implementations'].fillna('').astype(str)
+    hooked_mask = di.str.strip().astype(bool)
+    hooked_count= int(hooked_mask.sum())
+
+    # 2) Baseline vs. actual implementations → discrepancy
+    baseline     = int(df['Total Implementations'].max())
+    discrepancies= baseline - df['Total Implementations']
+    max_discrepancy = int(discrepancies.max())
+
+    # 3) Identify user-mode hooks: rows where the implementer string after ":"
+    #    looks like a user process (e.g. "7436:OUTLOOK.EXE")
+    def _is_userland(s: str) -> bool:
+        parts = s.split(':', 1)
+        if len(parts) == 2:
+            proc = parts[1].strip()
+            return '.' in proc   # crude check: user-mode executables have an extension
+        return False
+
+    hooked_series = di[hooked_mask]
+    # per-row mask: does any implementer in this row qualify?
+    is_user_row = hooked_series.apply(
+        lambda s: any(_is_userland(p.strip()) for p in s.replace(',', ';').split(';') if p.strip())
+    )
+    userland_hook_ratio = float(is_user_row.mean()) if hooked_count else 0.0
+
+    # 4) Collect **all** implementer tokens and compute entropy
+    impls = []
+    for s in hooked_series:
+        for part in [p.strip() for p in s.replace(',', ';').split(';') if p.strip()]:
+            impls.append(part)
+    hooked_entropy = list_entropy(impls)
+
+    return {
+        'syscalls.hooked_function_count': hooked_count,
+        'syscalls.userland_hook_ratio'  : round(userland_hook_ratio, 4),
+        'syscalls.max_impl_discrepancy' : max_discrepancy,
+        'syscalls.hooked_entropy'       : round(hooked_entropy, 4),
+    }
+
+
+
+
+
+def extract_windows_features(jsondump):
+    """
+    windows.windows → six new metrics:
+      • windows.total_window_objs       : total window objects
+      • windows.pid0_window_ratio       : share of rows with PID == 0
+      • windows.null_title_ratio        : fraction where Window is null
+      • windows.blank_process_ratio     : fraction where Process is empty
+      • windows.avg_win_per_process     : mean windows-per-PID
+      • windows.station_mismatch_count  : rows whose Station != 'WinSta0'
+    """
+    df = pd.read_json(jsondump)
+
+    keys = [
+        'windows.total_window_objs',
+        'windows.pid0_window_ratio',
+        'windows.null_title_ratio',
+        'windows.blank_process_ratio',
+        'windows.avg_win_per_process',
+        'windows.station_mismatch_count',
+    ]
+    if df.empty:
+        return {
+            'windows.total_window_objs'      : 0,
+            'windows.pid0_window_ratio'      : 0.0,
+            'windows.null_title_ratio'       : 0.0,
+            'windows.blank_process_ratio'    : 0.0,
+            'windows.avg_win_per_process'    : 0.0,
+            'windows.station_mismatch_count' : 0,
+        }
+
+    total = len(df)
+
+    # 1) raw count
+    total_objs = total
+
+    # 2) share PID==0
+    pid0_ratio = df['PID'].eq(0).mean()
+
+    # 3) null Window titles
+    null_title_ratio = df['Window'].isna().mean()
+
+    # 4) blank Process strings
+    blank_proc_ratio = df['Process'].fillna('').eq('').mean()
+
+    # 5) average windows per process
+    avg_per_proc = df.groupby('PID').size().mean()
+
+    # 6) stations not 'WinSta0'
+    station_mismatch = int(
+        df['Station'].fillna('').ne('WinSta0').sum()
+    )
+
+    return {
+        'windows.total_window_objs'      : int(total_objs),
+        'windows.pid0_window_ratio'      : round(pid0_ratio, 4),
+        'windows.null_title_ratio'       : round(null_title_ratio, 4),
+        'windows.blank_process_ratio'    : round(blank_proc_ratio, 4),
+        'windows.avg_win_per_process'    : round(avg_per_proc, 2),
+        'windows.station_mismatch_count' : station_mismatch,
+    }
+
+def extract_windowstations_features(jsondump):
+    """
+    Extracts these features from windows.windowstations JSON:
+      • winsta.total_stations         : total station objects
+      • winsta.service_station_ratio  : proportion where Name starts with "Service-"
+      • winsta.custom_station_count   : count of Names ≠ WinSta0 and not "Service-*"
+      • winsta.session0_gui_count     : session 0 stations whose Name ≠ WinSta0
+      • winsta.name_entropy_mean      : mean Shannon entropy of Name strings
+    """
+    df = pd.read_json(jsondump)
+    # keep schema stable on empty output
+    if df.empty:
+        return {
+            'winsta.total_stations'        : 0,
+            'winsta.service_station_ratio' : 0.0,
+            'winsta.custom_station_count'  : 0,
+            'winsta.session0_gui_count'    : 0,
+            'winsta.name_entropy_mean'     : 0.0,
+        }
+
+    # normalize names
+    names = df['Name'].fillna('')
+    total = len(names)
+
+    # 1) Service-stations
+    service_mask = names.str.startswith('Service-')
+    service_ratio = service_mask.mean()
+
+    # 2) Custom stations (neither WinSta0 nor Service-*)
+    custom_mask = (~names.str.lower().eq('winsta0')) & (~service_mask)
+    custom_count = int(custom_mask.sum())
+
+    # 3) Session-0 GUI stations (Name ≠ WinSta0 in Session 0)
+    sess0_gui_mask = (df['SessionId'] == 0) & (~names.str.lower().eq('winsta0'))
+    session0_gui_count = int(sess0_gui_mask.sum())
+
+    # 4) Name-entropy
+    entropies = names.apply(shannon_entropy)
+    entropy_mean = entropies.mean()
+
+    return {
+        'winsta.total_stations'        : int(total),
+        'winsta.service_station_ratio' : round(service_ratio, 4),
+        'winsta.custom_station_count'  : custom_count,
+        'winsta.session0_gui_count'    : session0_gui_count,
+        'winsta.name_entropy_mean'     : round(entropy_mean, 4),
+    }
+
+
+def extract_unloadedmodules_features(jsondump, known_drivers: set[str] = None):
+    """
+    Extracts these features from windows.unloadedmodules JSON:
+      • unloaded.n_entries              : total unload records
+      • unloaded.unique_driver_count    : distinct driver names
+      • unloaded.repeated_driver_ratio  : (n_entries – unique_driver_count) ÷ n_entries
+      • unloaded.burst_max_per_sec      : max unloads in any 1-second window
+      • unloaded.non_ms_driver_ratio    : share of names NOT in `known_drivers`
+    
+    Parameters
+    ----------
+    jsondump : file-like or path
+        JSON list from `windows.unloadedmodules -r json`.
+    known_drivers : set[str], optional
+        If you have a set of “legit” Windows driver names (e.g. from your
+        earlier modules dump), pass it here so we can flag 3rd-party/unsigned.
+        If None, this ratio will be returned as None.
+    """
+    df = pd.read_json(jsondump)
+
+    # keep schema stable on empty output
+    keys = [
+        'unloaded.n_entries',
+        'unloaded.unique_driver_count',
+        'unloaded.repeated_driver_ratio',
+        'unloaded.burst_max_per_sec',
+        'unloaded.non_ms_driver_ratio',
+    ]
+    if df.empty:
+        return {k: 0 if 'count' in k or 'entries' in k else None for k in keys}
+
+    # 1) total / unique
+    n_entries       = len(df)
+    unique_count    = df['Name'].nunique()
+    repeated_ratio  = (n_entries - unique_count) / n_entries if n_entries else 0.0
+
+    # 2) burst: parse Time, floor to second, count per-second, take max
+    times           = pd.to_datetime(df['Time'], errors='coerce', utc=True)
+    secs            = times.dt.floor('S')
+    burst_max       = int(secs.value_counts().max()) if not secs.isna().all() else 0
+
+    # 3) optional non-MS ratio
+    if known_drivers is not None:
+        non_ms_ratio = float((~df['Name'].isin(known_drivers)).mean())
+    else:
+        non_ms_ratio = None
+
+    return {
+        'unloaded.n_entries'             : n_entries,
+        'unloaded.unique_driver_count'   : unique_count,
+        'unloaded.repeated_driver_ratio' : round(repeated_ratio, 4),
+        'unloaded.burst_max_per_sec'     : burst_max,
+        'unloaded.non_ms_driver_ratio'   : non_ms_ratio,
+    }
+
+
+
+def extract_statistics_features(jsondump):
+    """
+    Extracts three metrics from windows.statistics JSON:
+      • statistics.invalid_page_ratio      – proportion of invalid pages
+      • statistics.swapped_page_count      – total swapped pages
+      • statistics.large_invalid_page_count– invalid pages (large)
+    """
+    df = pd.read_json(jsondump)
+
+    # keep schema stable on empty output
+    keys = [
+        'statistics.invalid_page_ratio',
+        'statistics.swapped_page_count',
+        'statistics.large_invalid_page_count',
+    ]
+    if df.empty:
+        return {
+            k: 0 if 'count' in k else None
+            for k in keys
+        }
+
+    row = df.iloc[0]
+
+    # count all invalid pages (including “Other Invalid Pages”)
+    invalid_all      = row.get('Invalid Pages (all)', 0) + row.get('Other Invalid Pages (all)', 0)
+    valid_all        = row.get('Valid pages (all)', 0)
+    swapped_all      = row.get('Swapped Pages (all)', 0)
+    total_pages      = invalid_all + valid_all + swapped_all
+
+    invalid_ratio    = (invalid_all / total_pages) if total_pages else None
+    swapped_count    = int(swapped_all)
+    large_invalid    = int(row.get('Invalid Pages (large)', 0))
+
+    return {
+        'statistics.invalid_page_ratio'       : invalid_ratio,
+        'statistics.swapped_page_count'       : swapped_count,
+        'statistics.large_invalid_page_count' : large_invalid,
+    }
+
+
+
+
+
+def extract_certificates_features(jsondump):
+    """
+    windows.registry.certificates → four new metrics:
+      • certs.disallowed_count
+      • certs.duplicate_autoupdate_entries
+      • certs.null_name_root_ratio
+      • certs.ca_cross_store_mismatch
+    """
+    df = pd.read_json(jsondump)
+
+    # keep schema even on empty output
+    keys = [
+        'certs.disallowed_count',
+        'certs.duplicate_autoupdate_entries',
+        'certs.null_name_root_ratio',
+        'certs.ca_cross_store_mismatch',
+    ]
+    if df.empty:
+        return {k: 0 for k in keys}
+
+    # normalize column names for convenience
+    sec = df['Certificate section'].fillna('')
+    cid = df['Certificate ID'].fillna('')
+    name = df['Certificate name']
+
+    # 1) Disallowed-store count
+    disallowed_cnt = int((sec == 'Disallowed').sum())
+
+    # 2) Duplicate AutoUpdate in AuthRoot
+    dup_auto = int(((cid == 'AutoUpdate') & (sec == 'AuthRoot')).sum())
+
+    # 3) Null-name ratio in ROOT store
+    root_mask = sec == 'ROOT'
+    total_root = int(root_mask.sum())
+    null_root = int((root_mask & name.isna()).sum())
+    null_name_root_ratio = null_root / total_root if total_root else 0.0
+
+    # 4) CA↔AuthRoot ID mismatches
+    #   IDs present in both sections with conflicting names or paths
+    auth = df[sec == 'AuthRoot']
+    ca   = df[sec == 'CA']
+    common_ids = set(auth['Certificate ID']).intersection(ca['Certificate ID'])
+
+    mismatch = 0
+    for _id in common_ids:
+        sub_a = auth[auth['Certificate ID'] == _id]
+        sub_c = ca[ca['Certificate ID'] == _id]
+
+        # compare name-sets (ignoring NaN)
+        names_a = set(sub_a['Certificate name'].dropna())
+        names_c = set(sub_c['Certificate name'].dropna())
+        if names_a != names_c:
+            mismatch += 1
+            continue
+
+        # compare paths
+        paths_a = set(sub_a['Certificate path'].str.lower())
+        paths_c = set(sub_c['Certificate path'].str.lower())
+        if paths_a != paths_c:
+            mismatch += 1
+
+    return {
+        'certs.disallowed_count'               : disallowed_cnt,
+        'certs.duplicate_autoupdate_entries'  : dup_auto,
+        'certs.null_name_root_ratio'          : round(null_name_root_ratio, 4),
+        'certs.ca_cross_store_mismatch'       : mismatch,
+    }
+
+
+
+
+
+
+
+
+def extract_hivelist_features(jsondump):
+    """
+    Extracts these features from windows.registry.hivelist JSON:
+      • hivelist.empty_path_entries : # rows where FileFullPath == ""
+      • hivelist.duplicate_paths    : total rows minus # unique FileFullPath
+      • hivelist.user_hive_count    : # per-user NTUSER/UsrClass hives loaded
+      • hivelist.offset_gap_stddev  : std-dev of gaps between sorted Offsets
+    """
+    df = pd.read_json(jsondump)
+
+    # If no rows, keep schema stable
+    keys = [
+        'hivelist.empty_path_entries',
+        'hivelist.duplicate_paths',
+        'hivelist.user_hive_count',
+        'hivelist.offset_gap_stddev',
+    ]
+    if df.empty:
+        return {k: 0 if 'count' in k or 'entries' in k else None for k in keys}
+
+    # normalize path column
+    paths = df['FileFullPath'].fillna('')
+    paths_lc = paths.str.lower()
+
+    #  empty-path entries
+    empty_cnt = (paths == '').sum()
+
+    #  duplicates: total rows minus unique non-empty paths
+    dup_cnt = len(paths) - paths.nunique()
+
+    #  per-user hives: look for ntuser.dat or usrclass.dat under Users\
+    user_mask = (
+        paths_lc.str.contains(r'\\users\\', na=False)
+        & paths_lc.str.contains(r'ntuser\.dat$|usrclass\.dat$', na=False)
+    )
+    user_hive_cnt = int(user_mask.sum())
+
+    #  offset gaps std-dev
+    offs = pd.to_numeric(df['Offset'], errors='coerce').dropna().sort_values()
+    gaps = offs.diff().dropna()
+    gap_std = float(gaps.std()) if not gaps.empty else None
+
+    return {
+        'hivelist.empty_path_entries': int(empty_cnt),
+        'hivelist.duplicate_paths'   : int(dup_cnt),
+        'hivelist.user_hive_count'   : user_hive_cnt,
+        'hivelist.offset_gap_stddev' : gap_std,
+    }
+
+
+def extract_modules_features(jsondump):
+    """
+    Extract features from windows.modules JSON (pd.read_json style).
+    Returns:
+      • modules.nModules
+      • modules.avgSizeKB
+      • modules.largeModuleRatio
+      • modules.userPathCount
+      • modules.driverStoreRatio
+      • modules.fileOutEnabled
+      • modules.nameEntropyMean
+      • modules.nonAsciiNameCount
+      • modules.sharedBaseAddrCount
+    """
+    df = pd.read_json(jsondump)
+    # guard empty
+    keys = [
+        'modules.nModules','modules.avgSizeKB','modules.largeModuleRatio',
+        'modules.userPathCount','modules.driverStoreRatio','modules.fileOutEnabled',
+        'modules.nameEntropyMean','modules.nonAsciiNameCount','modules.sharedBaseAddrCount'
+    ]
+    if df.empty:
+        return {k: None for k in keys}
+
+
+    # print(df.head())
+
+    # 1) Volume / mix
+    n = len(df)
+    avg_size_kb      = df['Size'].mean() / 1024
+    large_ratio      = (df['Size'] > 5 * 1024 * 1024).mean()
+
+    # 2) Path sanity
+    paths_lc         = df['Path'].fillna('').str.lower()
+    user_mask        = paths_lc.str.contains(r'\\program files|\\users\\.*\\temp|\\temp\\|\\appdata', regex=True)
+    user_count       = int(user_mask.sum())
+    driverstore_mask = paths_lc.str.contains('driverstore', na=False)
+    driverstore_ratio= driverstore_mask.mean()
+
+    # 3) File-output flag
+    fileout_enabled  = int((df['File output'] == 'Enabled').sum())
+
+    # 4) Entropy / masquerade
+    names            = df['Name'].fillna('')
+    entropies        = names.apply(shannon_entropy)
+    name_entropy_mean= entropies.mean()
+    nonascii_count   = int(names.apply(lambda s: any(ord(c) >= 128 for c in s)).sum())
+
+    # 5) Duplicate base
+    base_counts      = df['Base'].value_counts()
+    shared_base_cnt  = int((base_counts > 1).sum())
+
+    return {
+        'modules.nModules'            : n,
+        'modules.avgSizeKB'           : round(avg_size_kb, 2),
+        'modules.largeModuleRatio'    : round(large_ratio, 4),
+        'modules.userPathCount'       : user_count,
+        'modules.driverStoreRatio'    : round(driverstore_ratio, 4),
+        'modules.fileOutEnabled'      : fileout_enabled,
+        'modules.nameEntropyMean'     : round(name_entropy_mean, 4),
+        'modules.nonAsciiNameCount'   : nonascii_count,
+        'modules.sharedBaseAddrCount' : shared_base_cnt,
+    }
+
+
+
+
+
+
+
+
+def extract_iat_features(jsondump):
+    df = pd.read_json(jsondump)
+
+    # 2. Compute features
+    total_entries = len(df)
+    n_processes = df['PID'].nunique()
+    avg_imports_per_proc = total_entries / n_processes if n_processes else 0
+
+    # Ratio of bound imports
+    bound_ratio = df['Bound'].mean()
+
+    # Syscall appetite: proportion of imports that are direct syscalls (Nt*/Zw*)
+    syscall_mask = df['Function'].str.startswith(('Nt', 'Zw'), na=False)
+    syscall_ratio = syscall_mask.mean()
+
+    # Crypto & net use counts
+    crypto_mask = df['Function'].str.contains('Crypt|Crypto', case=False, na=False)
+    crypto_count = crypto_mask.sum()
+
+    netapi_mask = df['Function'].str.contains('Wininet|Ws2_32|Http', case=False, na=False)
+    net_api_count = netapi_mask.sum()
+
+    # Cross-architecture library count (api-ms-win-crt-* imports)
+    wow64_lib_mask = df['Library'].str.contains(r'^api-ms-win-crt-', case=False, na=False)
+    wow64_lib_count = wow64_lib_mask.sum()
+
+    # Entropy of function names
+    df['funcEntropy'] = df['Function'].fillna('').apply(shannon_entropy)
+    func_name_entropy_mean = df['funcEntropy'].mean()
+
+    # 3. Summarize
+    features = {
+        'totalEntries': total_entries,
+        'nProcesses': n_processes,
+        'avgImportsPerProc': avg_imports_per_proc,
+        'boundRatio': bound_ratio,
+        'syscallRatio': syscall_ratio,
+        'cryptoCount': crypto_count,
+        'netApiCount': net_api_count,
+        'wow64LibCount': wow64_lib_count,
+        'funcNameEntropyMean': func_name_entropy_mean
+    }
+
+    return features
+
+
+
+
+def extract_getservicesids_features(jsondump):
+    """
+    Extractor for windows.getservicesids JSON output (pd.read_json style).
+    Returns a dict with keys:
+      • servicesids.nServices
+      • servicesids.sidEntropy
+      • servicesids.svcNameEntropyMean
+      • servicesids.nonAlphaNameCount
+      • servicesids.sidReuseCount
+      • servicesids.highPrivRatio
+      • servicesids.exeMissingCount
+    """
+    df = pd.read_json(jsondump)
+
+    # 1) total services
+    n_services = len(df)
+
+    # 2) entropy of SID strings
+    sids = df["SID"].dropna().tolist()
+    sid_counts = Counter(sids)
+    if n_services:
+        sid_entropy = -sum(
+            (count / n_services) * math.log2(count / n_services)
+            for count in sid_counts.values()
+        )
+    else:
+        sid_entropy = None
+
+    # 3) per-string char entropy for service names → mean
+    names = df["Service"].fillna("").astype(str)
+
+    name_entropies = names.map(char_entropy)
+    svc_name_entropy_mean = name_entropies.mean() if n_services else None
+
+    # 4) count of names containing any non-A–Z/a–z character
+    non_alpha_mask = names.str.contains(r"[^A-Za-z]")
+    non_alpha_count = int(non_alpha_mask.sum())
+
+    # 5) duplicate-SID reuse: sum of (count>1) occurrences
+    sid_reuse_count = sum(cnt for cnt in sid_counts.values() if cnt > 1)
+
+    # 6) privilege-tilt ratio: RIDs < 1000 (last dash-field of SID)
+    rids = pd.to_numeric(
+        df["SID"].str.rsplit("-", n=1).str[-1],
+        errors="coerce"
+    )
+    high_priv_mask = rids < 1000
+    high_priv_ratio = float(high_priv_mask.sum() / n_services) if n_services else None
+
+    # 7) shadow services: missing ImagePath entries
+    #    (only works if the plugin ever emits an ImagePath column)
+    if "ImagePath" in df.columns:
+        exe_missing_count = int(df["ImagePath"].isna().sum())
+    else:
+        exe_missing_count = None
+
+    return {
+        "servicesids.nServices"          : n_services,
+        "servicesids.sidEntropy"         : round(sid_entropy, 4) if sid_entropy is not None else None,
+        "servicesids.svcNameEntropyMean" : round(svc_name_entropy_mean, 4) if svc_name_entropy_mean is not None else None,
+        "servicesids.nonAlphaNameCount"  : non_alpha_count,
+        "servicesids.sidReuseCount"      : sid_reuse_count,
+        "servicesids.highPrivRatio"      : round(high_priv_ratio, 4) if high_priv_ratio is not None else None,
+        "servicesids.exeMissingCount"    : exe_missing_count,
+    }
+
+    
+def extract_deskscan_features(jsondump):
+    """
+    Extractor for windows.deskscan → computes:
+      • deskscan.totalEntries         : total number of Desktop objects
+      • deskscan.uniqueDesktops       : count of distinct Desktop names
+      • deskscan.uniqueWinStations    : count of distinct Window Station names
+      • deskscan.session0GuiCount     : rows where Session==0 AND Window Station=="WinSta0"
+      • deskscan.topProcDesktopRatio  : max windows owned by one Process ÷ totalEntries
+    """
+    df = pd.read_json(jsondump)  # reads the JSON array into a DataFrame :contentReference[oaicite:0]{index=0}
+
+    # empty‐output guard
+    if df.empty:
+        return {
+            'deskscan.totalEntries'        : 0,
+            'deskscan.uniqueDesktops'      : 0,
+            'deskscan.uniqueWinStations'   : 0,
+            'deskscan.session0GuiCount'    : 0,
+            'deskscan.topProcDesktopRatio' : 0.0,
+        }
+
+    total = len(df)
+
+    #  Desktop spread
+    unique_desktops    = df['Desktop'].nunique()
+    unique_winstns     = df['Window Station'].nunique()
+
+    # Session-0 GUI check
+    sess0_gui = df[
+        (df['Session'] == 0) &
+        (df['Window Station'] == 'WinSta0')
+    ].shape[0]
+
+    #  Process diversity: who “owns” the most windows?
+    proc_counts = df['Process'].value_counts()
+    top_owner   = proc_counts.iloc[0] if not proc_counts.empty else 0
+    top_ratio   = top_owner / total if total else 0.0
+
+    # ── Orphan desktops ────────────────────────────────────────────────────────
+    defaults     = {"Default", "Winlogon"}
+    unique_names = df["Desktop"].dropna().unique()
+    n_orphan     = sum(1 for name in unique_names if name not in defaults)
+
+    # …then in your return dict, add:
+
+    return {
+        'deskscan.totalEntries'        : total,
+        'deskscan.uniqueDesktops'      : unique_desktops,
+        'deskscan.uniqueWinStations'   : unique_winstns,
+        'deskscan.session0GuiCount'    : sess0_gui,
+        'deskscan.topProcDesktopRatio' : round(top_ratio, 4),
+        "deskscan.nOrphanDesktops": n_orphan,
+
+    }
+
+
+
+
+
+
+
+
+######################################
 
 def extract_winInfo_features(jsondump):
     df = pd.read_json(jsondump)
@@ -12,16 +734,20 @@ def extract_winInfo_features(jsondump):
         b = df.loc[8].at["Value"]                                     #Version of Windows Build
         c = int(df.loc[11].at["Value"])                               #Number of Processors
         d = bool(json.loads(df.loc[4].at["Value"].lower()))           #Is Windows Physical Address Extension (PAE) is a processor feature that enables x86 processors to access more than 4 GB of physical memory
+        # e = df[df['Variable']]
+        e = int(pd.to_datetime(df.loc[df['Variable']=='SystemTime','Value'].iat[0], utc=True))
     except:
         a = None
         b = None
         c = None
         d = None
+        e = None
     return{
         'info.Is64': a,
         'info.winBuild': b,
         'info.npro': c,
-        'info.IsPAE': d
+        'info.IsPAE': d,
+        'info.SystemTime': e
     }
 
 def extract_bigpools_features(jsondump):
@@ -63,6 +789,123 @@ def extract_bigpools_features(jsondump):
         'bigpools.tagEntropyMean': float(round(tag_entropy_mean, 4)),
         'bigpools.tagRare'       : int(tag_rare),
     }
+
+
+
+def extract_consoles_features(jsondump):
+    """
+    Extract all seven console metrics from windows.consoles JSON.
+    Expects `jsondump` to be a file‐like handle (open(…, 'r')) whose
+    contents are the raw JSON array emitted by `windows.consoles -r json`.
+    """
+    try:
+        data = json.load(jsondump)
+    except Exception:
+        # keep your CSV schema if the plugin failed
+        return {k: None for k in [
+            'consoles.nConhost',
+            'consoles.avgProcPerConsole',
+            'consoles.maxProcPerConsole',
+            'consoles.emptyHistoryRatio',
+            'consoles.histBufOverflow',
+            'consoles.titleSuspicious',
+            'consoles.dumpIoC',
+        ]}
+
+    # Detect root‐wrapped JSON vs flat list
+    if (isinstance(data, list) and len(data) == 1
+        and isinstance(data[0], dict) and "__children" in data[0]
+        and all(k == "__children" for k in data[0].keys())):
+        consoles = data[0]["__children"]
+    else:
+        consoles = data
+
+    nConhost = len(consoles)
+
+    proc_counts = []
+    total_cmds = 0
+    null_cmds  = 0
+    buf_overflow = 0
+    title_susp   = 0
+    dump_ioc     = 0
+
+    IOC_KEYWORDS = ["curl", "http", "invoke-webrequest", "mimikatz"]
+
+    def is_system_path(p):
+        p = (p or "").lower()
+        return p.startswith("c:\\windows") or p.startswith("%systemroot%")
+
+    for console in consoles:
+        children = console.get("__children", [])
+
+        # 1) ProcessCount
+        pc = 0
+        for c in children:
+            if c.get("Property","").endswith(".ProcessCount"):
+                pc = int(c.get("Data") or 0)
+                break
+        proc_counts.append(pc)
+
+        # 2) HistoryBuffer overflow?
+        hb_count = hb_max = None
+        for c in children:
+            prop = c.get("Property","")
+            if prop.endswith(".HistoryBufferCount"):
+                hb_count = int(c.get("Data") or 0)
+            elif prop.endswith(".HistoryBufferMax"):
+                hb_max = int(c.get("Data") or 0)
+        if hb_count is not None and hb_max is not None and hb_count == hb_max:
+            buf_overflow += 1
+
+        # 3) emptyHistoryRatio
+        for c in children:
+            if c.get("Property","").endswith(".CommandCount"):
+                total_cmds += 1
+                if c.get("Data") in (None, "", []):
+                    null_cmds += 1
+
+        # 4) titleSuspicious
+        title = ""
+        # prefer .Title
+        for c in children:
+            if c.get("Property","").endswith(".Title"):
+                title = c.get("Data") or ""
+                break
+        # fallback to .OriginalTitle
+        if not title:
+            for c in children:
+                if c.get("Property","").endswith(".OriginalTitle"):
+                    title = c.get("Data") or ""
+                    break
+        if title and not is_system_path(title):
+            title_susp += 1
+
+        # 5) dumpIoC
+        dump_txt = ""
+        for c in children:
+            if c.get("Property","").endswith(".Dump"):
+                dump_txt = (c.get("Data") or "").lower()
+                break
+        if any(kw in dump_txt for kw in IOC_KEYWORDS):
+            dump_ioc += 1
+
+    # finalize aggregates
+    avg_proc = sum(proc_counts) / nConhost if nConhost else 0
+    max_proc = max(proc_counts) if proc_counts else 0
+    empty_hist_ratio = (null_cmds / total_cmds) if total_cmds else 0.0
+
+    return {
+        'consoles.nConhost'          : nConhost,
+        'consoles.avgProcPerConsole' : round(avg_proc, 2),
+        'consoles.maxProcPerConsole' : int(max_proc),
+        'consoles.emptyHistoryRatio' : round(empty_hist_ratio, 3),
+        'consoles.histBufOverflow'   : buf_overflow,
+        'consoles.titleSuspicious'   : title_susp,
+        'consoles.dumpIoC'           : dump_ioc,
+    }
+
+
+
 def extract_pslist_features(jsondump):
     df = pd.read_json(jsondump)
 
@@ -247,7 +1090,7 @@ def extract_joblinks_features(jsondump):
     else:                                  # already-parsed object
         data = json.load(jsondump)
 
-    flat = list(_flatten_records(data))
+    flat = list(flatten_records(data))
     if not flat:        # keep columns stable on empty output
         return {
             'joblinks.nJobObjs'         : 0,
@@ -270,7 +1113,7 @@ def extract_joblinks_features(jsondump):
             if active / tot > 0.8:
                 high_skew += 1
 
-    name_entropy = [_char_entropy(str(r.get("Name", ""))) for r in flat]
+    name_entropy = [char_entropy(str(r.get("Name", ""))) for r in flat]
     name_entropy_mean = sum(name_entropy) / total_rows
 
     # Job objects = top-level rows (JobLink is null)
@@ -451,13 +1294,13 @@ def extract_malfind_features(jsondump):
         'malfind.aveVPN_diff': df['End VPN'].sub(df['Start VPN']).sum()           #Avg VPN size of injections
     }
 
-def extract_modules_features(jsondump):
-    df = pd.read_json(jsondump)
-    return {
-        'modules.nmodules': df.Base.size,                                          #Number of Modules
-        'modules.avgSize': df.Size.mean(),                             #Average size of the modules
-        'modules.FO_enabled': df.Base.size - len(df[df["File output"]=='Disabled'])#Number of Output enabled File Output
-    }
+# def extract_modules_features(jsondump):
+#     df = pd.read_json(jsondump)
+#     return {
+#         'modules.nmodules': df.Base.size,                                          #Number of Modules
+#         'modules.avgSize': df.Size.mean(),                             #Average size of the modules
+#         'modules.FO_enabled': df.Base.size - len(df[df["File output"]=='Disabled'])#Number of Output enabled File Output
+#     }
 
 def extract_callbacks_features(jsondump):
     df = pd.read_json(jsondump)

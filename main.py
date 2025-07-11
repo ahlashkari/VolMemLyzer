@@ -25,8 +25,6 @@ def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_p
 
     print('=> All done')
 
-
-
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('-f','--memdump',default=None, help='Path to folder/directory which has all memdumps',required = True)

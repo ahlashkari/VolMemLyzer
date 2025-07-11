@@ -5,13 +5,27 @@ import math
 import pandas as pd
 from collections.abc import Iterable
 from collections import Counter
+# from extractors import extract_winInfo_features
+
+# DUMP_TIME = extract_winInfo_features(json)
+
+
 
 
 def invoke_volatility3(vol_py_path, memdump_path, module, output_to):
     with open(output_to,'w') as f:
         subprocess.run(['python',vol_py_path, '-f', memdump_path, '-r=json', 'windows.'+module],stdout=f,text=True, check=True)
 
-def _char_entropy(s: str) -> float:
+def list_entropy(items):
+    """Shannon entropy of a list of hashable items (0.0 if empty)."""
+    if not items:
+        return 0.0
+    cnt = Counter(items)
+    total = sum(cnt.values())
+    return -sum((c/total) * math.log2(c/total) for c in cnt.values())
+
+
+def char_entropy(s: str) -> float:
     """Per-string Shannon entropy (0-8 bit range for ASCII)."""
     if not s:
         return 0.0
@@ -19,12 +33,12 @@ def _char_entropy(s: str) -> float:
     return -sum((c / n) * math.log2(c / n) for c in cnt.values())
 
 # --------------------------------------------------------------------------- #
-def _flatten_records(rows):
+def flatten_records(rows):
     """Yield every dict in the tree (top + nested __children)."""
     for r in rows:
         yield r
         for child in r.get("__children", []):
-            yield from _flatten_records([child])
+            yield from flatten_records([child])
 
 
 def shannon_entropy(obj):
