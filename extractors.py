@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+
 import math
 import json
 from utils import shannon_entropy, char_entropy, flatten_records, list_entropy
@@ -542,12 +544,6 @@ def extract_modules_features(jsondump):
     }
 
 
-
-
-
-
-
-
 def extract_iat_features(jsondump):
     df = pd.read_json(jsondump)
 
@@ -1004,70 +1000,53 @@ def extract_cmdscan_features(jsondump):
         cmdscan.appMismatch       : # blocks where Application ≠ parent Process
         cmdscan.cmdCountRatio     : mean(CommandCount / CommandCountMax)
     """
-    try:
-        records = json.load(jsondump)          # jsondump is an open()-handle
-    except Exception:
-        return {                               # keep headers stable on failure
-            'cmdscan.nHistories'   : None,
-            'cmdscan.nonZeroHist'  : None,
-            'cmdscan.maxCmds'      : None,
-            'cmdscan.appMismatch'  : None,
-            'cmdscan.cmdCountRatio': None,
+    df = pd.read_json(jsondump)          # jsondump is an open()-handle
+    if df.empty:
+        return {k: None for k in (
+        'cmdscan.nHistories', 'cmdscan.nonZeroHist',
+        'cmdscan.maxCmds', 'cmdscan.appMismatch',
+        'cmdscan.cmdCountRatio')
         }
 
-    # ── gather one dict per history block ────────────────────────────────────
-    histories = []
-    for rec in records:
-        if rec.get('Property') != '_COMMAND_HISTORY':
-            continue
+    cmd_df = df[df['Property'] == '_COMMAND_HISTORY']
+    nHistories = len(cmd_df)
+    cmd_counts = []
+    mismatch = 0
+        
+    # print(cmd_df)
+    for _, row in cmd_df.iterrows():
+        # print(row)
+        pid = row['PID']
+        children_arr =  row['__children'] #['Property']
+        
+        for child in children_arr:
+            if child['Property'].endswith(".CommandCount"): # and child['Data'] != '0':
+                # nNonZero +=1
+                # cmd_counts.append(int(child['Data']))
+                cmd_count = int(child['Data'])
+            
+            # print(child['PID'])
+            if child['Property'].endswith('.Application') and child['PID'] != pid:
+                mismatch +=1
+    
+            if child['Property'].endswith('.CommandCountMax'):
+                cmd_max = int(child['Data'])
 
-        hist = {'PID': rec.get('PID'), 'Process': rec.get('Process')}
-        for child in rec.get('__children', []):
-            prop = child.get('Property', '')
-            dat  = child.get('Data', '')
+        cmd_counts.append(cmd_count)  
 
-            if prop.endswith('.Application'):
-                hist['Application'] = dat
-            elif prop.endswith('.CommandCount'):
-                hist['CommandCount'] = int(dat or 0)
-            elif prop.endswith('.CommandCountMax'):
-                hist['CommandCountMax'] = int(dat or 0)
-
-        histories.append(hist)
-
-    if not histories:            # rare but possible
-        return {
-            'cmdscan.nHistories'   : 0,
-            'cmdscan.nonZeroHist'  : 0,
-            'cmdscan.maxCmds'      : 0,
-            'cmdscan.appMismatch'  : 0,
-            'cmdscan.cmdCountRatio': 0.0,
-        }
-
-    # ── compute metrics ──────────────────────────────────────────────────────
-    n_hist   = len(histories)
-    non_zero = sum(h.get('CommandCount', 0) > 0 for h in histories)
-    max_cmds = max(h.get('CommandCount', 0) for h in histories)
-
-    app_mis  = sum(
-        1 for h in histories
-        if h.get('Application', '').lower() not in ('', h.get('Process', '').lower())
-    )
-
-    ratios   = [
-        h['CommandCount'] / h['CommandCountMax']
-        for h in histories
-        if h.get('CommandCountMax', 0) > 0
-    ]
-    mean_ratio = round(mean(ratios), 4) if ratios else 0.0
-
+    cmd_counts = np.array(cmd_counts)
+    nNonZero = np.count_nonzero(cmd_counts)
+    MaxCmd = int(max(cmd_counts))
+    CmdCountRatio = float(mean(cmd_counts/cmd_max))
+        
     return {
-        'cmdscan.nHistories'   : n_hist,
-        'cmdscan.nonZeroHist'  : non_zero,
-        'cmdscan.maxCmds'      : max_cmds,
-        'cmdscan.appMismatch'  : app_mis,
-        'cmdscan.cmdCountRatio': mean_ratio,
+        'cmdscan.nHistories'   : nHistories,
+        'cmdscan.nonZeroHist'  : nNonZero,
+        'cmdscan.maxCmds'      : MaxCmd,
+        'cmdscan.appMismatch'  : mismatch,
+        'cmdscan.cmdCountRatio': CmdCountRatio,
     }
+
 
 
 def extract_joblinks_features(jsondump):
