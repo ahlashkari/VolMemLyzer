@@ -4,23 +4,53 @@ import argparse
 from config import *
 from utils import *
 
+
+
 def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_path):
     features = {}
     print('=> Outputting to', CSVoutput_path)
 
     with tempfile.TemporaryDirectory() as workdir:
         vol = functools.partial(invoke_volatility3, volatility_path, memdump_path)
+        
+        for module, extractor in BASE_VOL_MODULES.items(): 
+            print('=> Executing Volatility module', repr(module))
+            output_file_path = os.path.join(workdir, module)
+            vol(module, output_file_path)
+            with open(output_file_path, 'r') as output:
+                module_features = extractor(output)
+                
+                if module == 'info':
+                    DUMP_TIME = module_features.get('info.SystemTime') or None
+                    features.update(module_features)
+                
+                if module == 'pslist':
+                    PID_LIST = module_features[0]
+                    features.update(module_features[1])
+                    # del module_features
+
+       
         for module, extractor in VOL_MODULES.items():
             print('=> Executing Volatility module', repr(module))
             output_file_path = os.path.join(workdir, module)
             vol(module, output_file_path)
             with open(output_file_path, 'r') as output:
-                features.update(extractor(output))
+                
+                if module == 'cmdscan':
+                    print(PID_LIST)
+                    module_features = extractor(output, PID_LIST)
+                    features.update(module_features)
+                    # del module_features
+                
+                # module_features = extractor(output)
+                # features.update(module_features)
+
+            
     
     features_mem = {'mem.name_extn': str(memdump_path).rsplit('/', 1)[-1]}
     features_mem.update(features)
 
-    file_path = os.path.join(CSVoutput_path, 'output.csv')
+    file_path = os.path.join(CSVoutput_path, 'output1.csv')
     write_dict_to_csv(file_path,features_mem,memdump_path)
 
     print('=> All done')

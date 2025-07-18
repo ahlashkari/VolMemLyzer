@@ -59,6 +59,34 @@ def shannon_entropy(obj):
     counts = series.value_counts(normalize=True)
     return float((-counts * counts.map(math.log2)).sum())
 
+def not_system_path(p):
+    p = (p or "").lower()
+    if 'administrator' in p or "c:\\windows" in p or p.startswith("%systemroot%") or p.startswith("\\systemroot"):
+        return False
+    return True
+    
+# def get_depth(series):
+    # print((node))
+    # depths = []
+    # for child in series:
+    #     print(child)
+
+    #     if child != []:
+    #         print(child) 
+    #         depths.append(1 + get_depth(child))
+     
+    # return max(depths)   # print(get_depth(child))
+
+    # print(series)
+        
+
+
+
+    # if isinstance(node, list) and node:
+    #     print('here')
+    #     return 1 + max(get_depth(child) for child in node)
+    # return 1  # If it's a leaf node (empty list or no children)
+
 def write_dict_to_csv(filename, dictionary,memdump_path):
     fieldnames = list(dictionary.keys())
     

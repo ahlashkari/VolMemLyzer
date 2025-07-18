@@ -1,11 +1,42 @@
 import pandas as pd
 import numpy as np
-
+from datetime import datetime, timezone
 import math
 import json
-from utils import shannon_entropy, char_entropy, flatten_records, list_entropy
+from utils import *
 from collections import Counter
 import re
+from statistics import mean
+
+
+
+
+#### fix ioc keyword input
+#### fix time baseline for the dump
+
+def extract_winInfo_features(jsondump):
+    df = pd.read_json(jsondump)
+    try:
+        a = bool(json.loads(df.loc[3].at["Value"].lower()))           #Is Windows a 64 Version 
+        b = df.loc[8].at["Value"]                                     #Version of Windows Build
+        c = int(df.loc[11].at["Value"])                               #Number of Processors
+        d = bool(json.loads(df.loc[4].at["Value"].lower()))           #Is Windows Physical Address Extension (PAE) is a processor feature that enables x86 processors to access more than 4 GB of physical memory
+        # e = df[df['Variable']]
+        e = int(pd.to_datetime(df.loc[df['Variable']=='SystemTime','Value'].iat[0], utc=True))
+    except:
+        a = None
+        b = None
+        c = None
+        d = None
+        e = None
+    return{
+        'info.Is64': a,
+        'info.winBuild': b,
+        'info.npro': c,
+        'info.IsPAE': d,
+        'info.SystemTime': e
+    }
+
 
 
 def extract_svclist_features(jsondump):
@@ -605,13 +636,13 @@ def extract_getservicesids_features(jsondump):
       • servicesids.exeMissingCount
     """
     df = pd.read_json(jsondump)
-
     # 1) total services
     n_services = len(df)
 
     # 2) entropy of SID strings
     sids = df["SID"].dropna().tolist()
     sid_counts = Counter(sids)
+    # print(sid_counts)
     if n_services:
         sid_entropy = -sum(
             (count / n_services) * math.log2(count / n_services)
@@ -624,7 +655,7 @@ def extract_getservicesids_features(jsondump):
     names = df["Service"].fillna("").astype(str)
 
     name_entropies = names.map(char_entropy)
-    svc_name_entropy_mean = name_entropies.mean() if n_services else None
+    svc_name_entropy_mean = float(name_entropies.mean()) if n_services else None
 
     # 4) count of names containing any non-A–Z/a–z character
     non_alpha_mask = names.str.contains(r"[^A-Za-z]")
@@ -633,20 +664,24 @@ def extract_getservicesids_features(jsondump):
     # 5) duplicate-SID reuse: sum of (count>1) occurrences
     sid_reuse_count = sum(cnt for cnt in sid_counts.values() if cnt > 1)
 
+
+    
+    sid_group_count = (~df['SID'].str.startswith('S-1-5-80-')).sum()
+
     # 6) privilege-tilt ratio: RIDs < 1000 (last dash-field of SID)
     rids = pd.to_numeric(
         df["SID"].str.rsplit("-", n=1).str[-1],
         errors="coerce"
     )
-    high_priv_mask = rids < 1000
-    high_priv_ratio = float(high_priv_mask.sum() / n_services) if n_services else None
 
-    # 7) shadow services: missing ImagePath entries
-    #    (only works if the plugin ever emits an ImagePath column)
-    if "ImagePath" in df.columns:
-        exe_missing_count = int(df["ImagePath"].isna().sum())
-    else:
-        exe_missing_count = None
+    sorted_sids = sorted(rids)
+    sid_gaps = [sorted_sids[i+1] - sorted_sids[i] for i in range(len(sorted_sids) - 1)]
+    sid_gap_avg = sum(sid_gaps) / len(sid_gaps) if sid_gaps else 0
+    
+
+    sid_depths = df["SID"].apply(lambda x: len(x.split("-")) - 1)
+    sid_depth_max = sid_depths.max() #value_counts()
+    # print(sid_depth_max)
 
     return {
         "servicesids.nServices"          : n_services,
@@ -654,12 +689,12 @@ def extract_getservicesids_features(jsondump):
         "servicesids.svcNameEntropyMean" : round(svc_name_entropy_mean, 4) if svc_name_entropy_mean is not None else None,
         "servicesids.nonAlphaNameCount"  : non_alpha_count,
         "servicesids.sidReuseCount"      : sid_reuse_count,
-        "servicesids.highPrivRatio"      : round(high_priv_ratio, 4) if high_priv_ratio is not None else None,
-        "servicesids.exeMissingCount"    : exe_missing_count,
+        "servicesids.maxdepth"           : sid_depth_max,
+        "servicesids.unusualSIDAuthority": sid_group_count,
+        "servicesids.sidGapAvg"          : sid_gap_avg,
     }
-
     
-def extract_deskscan_features(jsondump):
+def extract_deskscan_features(jsondump, pids):
     """
     Extractor for windows.deskscan → computes:
       • deskscan.totalEntries         : total number of Desktop objects
@@ -700,7 +735,8 @@ def extract_deskscan_features(jsondump):
     # ── Orphan desktops ────────────────────────────────────────────────────────
     defaults     = {"Default", "Winlogon"}
     unique_names = df["Desktop"].dropna().unique()
-    n_orphan     = sum(1 for name in unique_names if name not in defaults)
+    n_irrelevant     = sum(1 for name in unique_names if name not in defaults)
+    n_orphan     = sum(1 for pid in df['PID'].values if pid not in pids)
 
     # …then in your return dict, add:
 
@@ -711,6 +747,7 @@ def extract_deskscan_features(jsondump):
         'deskscan.session0GuiCount'    : sess0_gui,
         'deskscan.topProcDesktopRatio' : round(top_ratio, 4),
         "deskscan.nOrphanDesktops": n_orphan,
+        'deskscan.nondefaultdesktops': n_irrelevant
 
     }
 
@@ -723,28 +760,6 @@ def extract_deskscan_features(jsondump):
 
 ######################################
 
-def extract_winInfo_features(jsondump):
-    df = pd.read_json(jsondump)
-    try:
-        a = bool(json.loads(df.loc[3].at["Value"].lower()))           #Is Windows a 64 Version 
-        b = df.loc[8].at["Value"]                                     #Version of Windows Build
-        c = int(df.loc[11].at["Value"])                               #Number of Processors
-        d = bool(json.loads(df.loc[4].at["Value"].lower()))           #Is Windows Physical Address Extension (PAE) is a processor feature that enables x86 processors to access more than 4 GB of physical memory
-        # e = df[df['Variable']]
-        e = int(pd.to_datetime(df.loc[df['Variable']=='SystemTime','Value'].iat[0], utc=True))
-    except:
-        a = None
-        b = None
-        c = None
-        d = None
-        e = None
-    return{
-        'info.Is64': a,
-        'info.winBuild': b,
-        'info.npro': c,
-        'info.IsPAE': d,
-        'info.SystemTime': e
-    }
 
 def extract_bigpools_features(jsondump):
     df = pd.read_json(jsondump)
@@ -795,7 +810,7 @@ def extract_consoles_features(jsondump):
     contents are the raw JSON array emitted by `windows.consoles -r json`.
     """
     try:
-        data = json.load(jsondump)
+        consoles = json.load(jsondump)
     except Exception:
         # keep your CSV schema if the plugin failed
         return {k: None for k in [
@@ -806,18 +821,10 @@ def extract_consoles_features(jsondump):
             'consoles.histBufOverflow',
             'consoles.titleSuspicious',
             'consoles.dumpIoC',
-        ]}
-
-    # Detect root‐wrapped JSON vs flat list
-    if (isinstance(data, list) and len(data) == 1
-        and isinstance(data[0], dict) and "__children" in data[0]
-        and all(k == "__children" for k in data[0].keys())):
-        consoles = data[0]["__children"]
-    else:
-        consoles = data
+        ]}        
+    
 
     nConhost = len(consoles)
-
     proc_counts = []
     total_cmds = 0
     null_cmds  = 0
@@ -827,65 +834,51 @@ def extract_consoles_features(jsondump):
 
     IOC_KEYWORDS = ["curl", "http", "invoke-webrequest", "mimikatz"]
 
-    def is_system_path(p):
-        p = (p or "").lower()
-        return p.startswith("c:\\windows") or p.startswith("%systemroot%")
+
+
 
     for console in consoles:
         children = console.get("__children", [])
-
+        # print(children)
         # 1) ProcessCount
         pc = 0
         for c in children:
-            if c.get("Property","").endswith(".ProcessCount"):
-                pc = int(c.get("Data") or 0)
-                break
-        proc_counts.append(pc)
-
-        # 2) HistoryBuffer overflow?
-        hb_count = hb_max = None
-        for c in children:
             prop = c.get("Property","")
-            if prop.endswith(".HistoryBufferCount"):
+            if prop.endswith(".ProcessCount"):
+                pc = int(c.get("Data") or 0)
+                # break
+            elif prop.endswith(".HistoryBufferCount"):
                 hb_count = int(c.get("Data") or 0)
+
             elif prop.endswith(".HistoryBufferMax"):
                 hb_max = int(c.get("Data") or 0)
-        if hb_count is not None and hb_max is not None and hb_count == hb_max:
-            buf_overflow += 1
 
-        # 3) emptyHistoryRatio
-        for c in children:
-            if c.get("Property","").endswith(".CommandCount"):
+            
+            elif prop.endswith(".CommandCount"):
                 total_cmds += 1
                 if c.get("Data") in (None, "", []):
                     null_cmds += 1
 
-        # 4) titleSuspicious
-        title = ""
-        # prefer .Title
-        for c in children:
-            if c.get("Property","").endswith(".Title"):
-                title = c.get("Data") or ""
-                break
-        # fallback to .OriginalTitle
-        if not title:
-            for c in children:
-                if c.get("Property","").endswith(".OriginalTitle"):
-                    title = c.get("Data") or ""
-                    break
-        if title and not is_system_path(title):
-            title_susp += 1
+            elif prop.endswith(".Title"):
+                title = c.get('Data', "")
 
-        # 5) dumpIoC
-        dump_txt = ""
-        for c in children:
-            if c.get("Property","").endswith(".Dump"):
+            elif prop.endswith(".OriginalTitle"):
+                org_title = c.get('Data', "")
+
+            elif prop.endswith(".Dump"):
                 dump_txt = (c.get("Data") or "").lower()
-                break
-        if any(kw in dump_txt for kw in IOC_KEYWORDS):
-            dump_ioc += 1
+                if any(kw in dump_txt for kw in IOC_KEYWORDS):
+                    dump_ioc += 1
+            else:
+                continue
+        
+        proc_counts.append(pc)
+        if hb_count is not None and hb_max is not None and hb_count == hb_max:
+            buf_overflow += 1
+        
+        if not_system_path(title) or not_system_path(org_title):
+            title_susp +=1
 
-    # finalize aggregates
     avg_proc = sum(proc_counts) / nConhost if nConhost else 0
     max_proc = max(proc_counts) if proc_counts else 0
     empty_hist_ratio = (null_cmds / total_cmds) if total_cmds else 0.0
@@ -907,7 +900,8 @@ def extract_pslist_features(jsondump):
 
     # ---------- V2 metrics ----------
     try:
-        nproc          = len(df)                               # total rows
+        nproc          = len(df) 
+        pids           = df['PID'].values
         nppid          = df.PPID.nunique()
         avg_threads    = df.Threads.mean()
         avg_handles    = df.Handles.mean()
@@ -923,7 +917,7 @@ def extract_pslist_features(jsondump):
 
         # Handles column can be null – cast safely
         handles_numeric = pd.to_numeric(df["Handles"], errors="coerce")
-        restricted_pct  = (handles_numeric.lt(4).sum() / nproc) if nproc else None
+        restricted_pct  = (handles_numeric.lt(4).sum() / nproc) if nproc else None        
 
         # User-land path heuristic: basename *not* living under Windows\ or Program Files\
         def is_user_path(name):
@@ -933,8 +927,8 @@ def extract_pslist_features(jsondump):
         user_path_ratio = df["ImageFileName"].apply(is_user_path).mean()
     except Exception:
         zombie_count = wow64_ratio = restricted_pct = user_path_ratio = None
-
-    return {
+    print(pids)
+    return [pids, {
         # V2
         "pslist.nproc"        : nproc,
         "pslist.nppid"        : nppid,
@@ -948,7 +942,7 @@ def extract_pslist_features(jsondump):
         "pslist.wow64_ratio"        : wow64_ratio,
         "pslist.restricted_handles_pct": restricted_pct,
         "pslist.user_path_ratio"    : user_path_ratio,
-    }
+    }]
 
 def extract_ssdt_features(jsondump):
     """
@@ -970,22 +964,18 @@ def extract_ssdt_features(jsondump):
     # Modified / hooked calls
     mod_mask   = df['Module'].str.lower() != 'ntoskrnl'
     modified   = int(mod_mask.sum())
-    uncommon   = '|'.join(sorted(df.loc[mod_mask, 'Symbol'].astype(str).unique()))
-
+    unique_syscalls = df['Symbol'].nunique()
     # Entropy of the whole table
     pair_series = df['Module'].astype(str) + '::' + df['Symbol'].astype(str)
+    print(pair_series)
     entropy_val = shannon_entropy(pair_series)
 
     return {
         'ssdt.modified_syscalls': modified,
-        'ssdt.uncommon_syscalls': uncommon,
+        'ssdt.unique_syscalls': unique_syscalls,
         'ssdt.syscall_entropy'  : entropy_val,
     }
 
-
-
-import json
-from statistics import mean
 
 def extract_cmdscan_features(jsondump):
     """
@@ -1062,13 +1052,8 @@ def extract_joblinks_features(jsondump):
         joblinks.highActiveSkew     : rows where Active/Total > 0.8
         joblinks.nameEntropyMean    : mean entropy of Name strings
     """
-    # --- load JSON -----------------------------------------------------------
-    if isinstance(jsondump, str):          # path was passed in
-        with open(jsondump, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:                                  # already-parsed object
-        data = json.load(jsondump)
-
+    data = json.load(jsondump)
+    
     flat = list(flatten_records(data))
     if not flat:        # keep columns stable on empty output
         return {
@@ -1137,25 +1122,40 @@ def extract_joblinks_features(jsondump):
 
 def extract_dlllist_features(jsondump):
     df = pd.read_json(jsondump)
-    try:
-        a = df.PID.size                                           #Total Number of all loaded libraries
-        b = df.PID.unique().size                              #Number of Processes loading dlls
-        c = df.PID.size/df.PID.unique().size             #Average loaded libraries per process
-        d = df.Size.sum()/df.PID.unique().size                  #Average Size of loaded libraries
-        e = df.PID.size - len(df[df["File output"]=="Disabled"]) #Number of loaded librearies outputting files
-    except:
-        a = None
-        b = None
-        c = None
-        d = None
-        e = None
-    return{
-        'dlllist.ndlls': a,
-        'dlllist.nproc_dll': b,
-        'dlllist.avg_dllPerProc': c,
-        'dlllist.avgSize': d,
-        'dlllist.outfile': e
+    if df.empty:                         # early‑out for empty inputs
+        return {}
+
+    df['LoadTime'] = pd.to_datetime(df['LoadTime'], errors='coerce')
+    pid_count = df['PID'].nunique() or 1  # avoid zero‑division
+
+# then:
+    features = {
+        # Core counts / averages
+        'dlllist.ndlls'            : df.shape[0],
+        'dlllist.nproc_dll'        : int(pid_count),
+        'dlllist.avg_dllPerProc'   : df.shape[0] / float(pid_count),
+        'dlllist.avgSize'          : float(df['Size'].sum() / float(pid_count)),
+        'dlllist.outfile'          : int(df.shape[0] - (df['File output'] == 'Disabled').sum()),
     }
+
+    features.update({
+        # New heuristics
+        'dlllist.nonSystemPathRatio': int(df['Path'].apply(not_system_path).sum()),
+        'dlllist.tempDirDlls'       : int(df['Path'].str.lower().str.contains(r'(?:%temp%|\\temp\\|appdata)', na=False).sum()),
+        'dlllist.globalSharedDlls'  : df.groupby('Name')
+                                          .filter(lambda x: len(x) / pid_count >= 0.5).shape[0],
+        'dlllist.uniqueDllRatio'    : df['Name'].nunique() / float(df.shape[0]),
+        'dlllist.smallDllCount'     : int((df['Size'] < 10_240).sum()),
+        'dlllist.hugeDllCount'      : int((df['Size'] > 20_971_520).sum()),
+        'dlllist.maxLoadDelaySec'   : int(
+            (df['LoadTime'] - df.groupby('PID')['LoadTime'].transform('first'))
+            .dt.total_seconds()
+            .max()
+        ),
+    })
+
+    return features
+
 
 def extract_handles_features(jsondump):
     df = pd.read_json(jsondump)
@@ -1285,6 +1285,10 @@ def extract_callbacks_features(jsondump):
     df = pd.read_json(jsondump)
     return {
         'callbacks.ncallbacks': df.Callback.size,                                               #Number of callbacks
+        'callbacks.distinct_modules'   : df['Module'].nunique(),
+        'callbacks.max_per_module'     : float( round(df.groupby('Module').size().max() / df.shape[0], 4)),
+        'callbacks.generic_kernel_count' : len(df[df['Type'] == 'GenericKernelCallback']),
+        'callbacks.no_symbol_count'    : len(df[df['Symbol'].isna()]),  
         'callbacks.nNoDetail': len(df[df["Detail"]=='None']),                                   #Number of callbacks with no detail
         'callbacks.nBugCheck': len(df[df["Type"]=='KeBugCheckCallbackListHead']),               #Number of callback Type --> KeBugCheckCallbackListHead
         'callbacks.nBugCheckReason': len(df[df["Type"]=='KeBugCheckReasonCallbackListHead']),   #Number of callback Type --> KeBugCheckReasonCallbackListHead
@@ -1301,28 +1305,70 @@ def extract_callbacks_features(jsondump):
 
 def extract_cmdline_features(jsondump):
     df = pd.read_json(jsondump)
-    return{
-        'cmdline.nLine': df.PID.size,                                                           #Number of cmd operations
-        'cmdline.not_in_C': df.PID.size - df['Args'].str.startswith("C:").sum(),                #Number of cmd initiating from C drive
-        'cmdline.n_exe': df['Process'].str.endswith("exe").sum(),                               #Number of cmd line exe
-        'cmdline.n_bin': df['Process'].str.endswith("bin").sum(),                               #Number of cmd line bin
+    # Existing v2 features
+    df = pd.read_json(jsondump)
+    # Existing v2 features
+    features = {
+        'cmdline.nLine': df.PID.size,                                                           # Number of cmd operations
+        'cmdline.not_in_C': df.PID.size - df['Args'].str.startswith("C:").sum(),                # Number of cmd initiating from C drive
+        'cmdline.n_exe': df['Process'].str.endswith("exe").sum(),                               # Number of cmd line exe
+        'cmdline.n_bin': int(df['Process'].str.endswith("bin").sum()),                               # Number of cmd line bin
     }
 
-def extract_devicetree_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'devicetree.ndevice': df.Type.size,                                                     #Number of devices in Device tree
-        'devicetree.nTypeNotDRV': df.Type.size - len(df[df["Type"]=='DRV']),                    #Number of devices with other than DRV type
+    # New features
+    features.update({
+        'cmdline.argsNull': int(df['Args'].isna().sum()),                                            # Number of rows where Args == null
+        'cmdline.scriptExec': df['Args'].str.endswith(tuple(['.ps1', '.bat', '.vbs', '.js', '.hta'])).sum(),  # Script execution (PowerShell, bat, etc.)
+        'cmdline.urlInArgs': df['Args'].str.contains(r'https?://').sum(),                       # Number of cmd lines containing URLs
+        'cmdline.netPath': df['Args'].str.startswith('\\\\').sum(),                             # Number of cmd lines with UNC paths
+        'cmdline.avgArgLen': df['Args'].str.len().mean() if df['Args'].notna().sum() > 0 else None,  # Average argument length
+        'cmdline.distinctProcesses': df['Process'].nunique(),                                  # Unique process names
+    })
+
+## TODO get depth
+def extract(jsondump):
+
+    df = pd.read_json(jsondump)
+    
+    # Existing v2 features
+    features = {
+        'devicetree.ndevice': df['Type'].size,  # Number of devices in device tree
+        'devicetree.nTypeNotDRV': df['Type'].size - len(df[df["Type"] == 'DRV']),  # Number of devices not of type DRV
     }
+
+    # New features
+    features.update({
+        'devicetree.uniqueDrivers': df['DriverName'].nunique(),  # Number of unique drivers
+        'devicetree.driverEntropy': shannon_entropy(df['DriverName']) if len(df) > 0 else None,  # Entropy of driver names                                         
+        # 'devicetree.maxDepth': get_depth(df['__children']) if df['__children'].notna().any() else None,  # Max depth of device tree
+        'devicetree.avgChildrenPerDRV': df[df['Type'] == 'DRV']['__children'].apply(len).mean() if len(df[df['Type'] == 'DRV']) > 0 else None,  # Avg children per DRV
+        'devicetree.attToNullDriver': len(df[(df['Type'] == 'ATT') & df['DriverNameOfAttDevice'].isna()]),  # Attachments with null drivers
+        'devicetree.nonDrvAttachRatio': len(df[df['Type'] != 'DRV']) / len(df) if len(df) > 0 else None,  # Non-DRV attachment ratio
+        'devicetree.diskDevRatio': len(df[df['DeviceType'] == 'FILE_DEVICE_DISK']) / len(df) if len(df) > 0 else None,  # Ratio of disk devices
+        'devicetree.busExtenderRatio': len(df[df['DeviceType'] == 'FILE_DEVICE_BUS_EXTENDER']) / len(df) if len(df) > 0 else None,  # Ratio of bus extender devices
+    })
+    
+    return features
 
 def extract_driverirp_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'driverirp.nIRP': df.IRP.size,                                                          #Number of deviceirps
-        'driverirp.nModules': df.Module.unique().size,                                          #Number of diff modules
-        'driverirp.nSymbols': df.Symbol.unique().size,                                          #Number fo diff Symbols
-        'driverirp.n_diff_add': df.Address.unique().size,                                       #Number of diff address
+    df = pd.read_json(jsondump)
+    
+    # Existing v2 features
+    features = {
+        'driverirp.nIRP': df['IRP'].size,                                                      # Number of device IRPs
+        'driverirp.nModules': df['Module'].unique().size,                                      # Number of different modules
+        'driverirp.nSymbols': df['Symbol'].unique().size,                                      # Number of different symbols
+        'driverirp.n_diff_add': df['Address'].unique().size,                                   # Number of different addresses
     }
+    
+    # New features
+    features.update({
+        'driverirp.invalidHandlerRatio': len(df[df['Symbol'] == 'IopInvalidDeviceRequest']) / len(df) if len(df) > 0 else None,  # Invalid handler ratio
+        'driverirp.nullSymbolCount': df['Symbol'].isna().sum(),  # Null symbol count
+        'driverirp.entropyIRPTypes': shannon_entropy(df['IRP']) if len(df) > 0 else None,  # Entropy of IRP types
+        'driverirp.sameAddressMultiDriver': (df['Address'].value_counts() > 1).sum(),  # Count of same address used by multiple drivers
+    })
+    return features
 
 def extract_drivermodule_features(jsondump):
     df=pd.read_json(jsondump)
