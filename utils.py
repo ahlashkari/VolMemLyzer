@@ -40,6 +40,9 @@ def flatten_records(rows):
         for child in r.get("__children", []):
             yield from flatten_records([child])
 
+def is_non_ascii(name):
+    return any(ord(char) > 127 for char in name)
+
 
 def shannon_entropy(obj):
 

@@ -927,7 +927,7 @@ def extract_pslist_features(jsondump):
         user_path_ratio = df["ImageFileName"].apply(is_user_path).mean()
     except Exception:
         zombie_count = wow64_ratio = restricted_pct = user_path_ratio = None
-    print(pids)
+    # print(pids)
     return [pids, {
         # V2
         "pslist.nproc"        : nproc,
@@ -1254,7 +1254,7 @@ def extract_ldrmodules_features(jsondump):
         'ldrmodules.not_in_load': len(df[df["InLoad"]==False]),                 #Number of modules missing from load list
         'ldrmodules.not_in_init': len(df[df["InInit"]==False]),                 #Number of modules missing from init list
         'ldrmodules.not_in_mem': len(df[df["InMem"]==False]),                   #Number of modules missing from mem list
-	'ldrmodules.nporc': df.Pid.unique().size,                               #Number of processes with modules in memory
+	    'ldrmodules.nporc': df.Pid.unique().size,                               #Number of processes with modules in memory
         'ldrmodules.not_in_load_avg': len(df[df["InLoad"]==False])/df.Base.size,#Avg number of modules missing from load list
         'ldrmodules.not_in_init_avg': len(df[df["InInit"]==False])/df.Base.size,#Avg number of modules missing from init list
         'ldrmodules.not_in_mem_avg': len(df[df["InMem"]==False])/df.Base.size,  #Avg number of modules missing from mem list
@@ -1307,6 +1307,7 @@ def extract_cmdline_features(jsondump):
     df = pd.read_json(jsondump)
     # Existing v2 features
     df = pd.read_json(jsondump)
+    
     # Existing v2 features
     features = {
         'cmdline.nLine': df.PID.size,                                                           # Number of cmd operations
@@ -1372,16 +1373,38 @@ def extract_driverirp_features(jsondump):
 
 def extract_drivermodule_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'drivermodule.nModules': df.Offset.size,                                                #Numner of driver module
     }
 
+    features.update({
+        'drivermodule.knownExceptionRatio'  : float(df['Known Exception'].sum() / len(df)),
+        'drivermodule.altNameMismatch'      : int((~df['Alternative Name'].str.startswith(('\\FileSystem', '\\Driver'))).sum()),
+        'drivermodule.noServiceKeyCount'    : int(df['Service Key'].isna().sum()),
+    })
+
+    return features
+
 def extract_driverscan_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'driverscan.nscan': df.Name.size,                                                       #Number of driverscans
-        'driverscan.avgSize': df.Size.sum()/df.Name.size,                                       #Average size of scan
+        'driverscan.avgSize': float(df.Size.sum()/df.Name.size),                                       #Average size of scan)
     }
+
+    features.update({
+        'driverscan.sizeZeroCount' : df[df['Size'] == 0].shape[0],  
+        'driverscan.nullServiceKeyRatio' : float(df[df['Service Key'].isna()].shape[0] / len(df)),
+        'driverscan.largeDriverCount' : int(df[df['Size'] > 2 * math.pow(10,6)].shape[0]),
+        'driverscan.miniDriverCount' : int(df[(df['Size'] < 2 * math.pow(10, 3)) & (df['Size'] > 0)].shape[0]),
+        'driverscan.nameEntropyMean' : float(df['Name'].dropna().apply(shannon_entropy).mean()), 
+        'driverscan.nonAsciiNameCount' : int(df['Name'].dropna().apply(is_non_ascii).sum()), 
+        'driverscan.duplicateStartAddr' : int(df['Start'].value_counts().apply(lambda x: x > 1).sum()),
+    })
+
+    return features
+
+
 
 # def extract_dumpfiles_features(jsondump):     ##### Use if you need the features as creates a lot of garbage in VOLMEMLYZER Folder
 #     df=pd.read_json(jsondump)
@@ -1391,9 +1414,11 @@ def extract_driverscan_features(jsondump):
 #         'dumpfiles.nFile': df.FileName.unique().size,                                           #Number of distinct files
 #     }
 
+
+#TODO fix the dataframe
 def extract_envars_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'envars.nVars': df.Value.size,                                                          #Number of environment variables
         'envars.nProc': df.PID.unique().size,                                                   #Number of Processes using Env vars
         'envars.nBlock': df.Block.unique().size,                                                #Number of Blocks 
@@ -1401,23 +1426,46 @@ def extract_envars_features(jsondump):
         'envars.nValue': df.Value.unique().size,                                                #Number of distinct value entries
     }
 
+    return features
+
 def extract_filescan_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'filescan.nFiles': df.Name.size,                                                        #Number of files
         'filescan.n_diff_file': df.Name.unique().size,                                          #Number of distinct files
     }
 
+    features.update({
+        'filescan.nonAsciiNameCount' : int(df['Name'].dropna().apply(is_non_ascii).sum()),
+        'filescan.nameEntropyMean' : float(df['Name'].dropna().apply(char_entropy).mean()),
+        'filescan.metaFileRatio' : float(df['Name'].str.startswith('\\$').sum() / len(df)),
+        'filescan.userProfileFileCount' : int(df['Name'].str.lower().str.startswith('\\users').sum()),
+        'filescan.sysUnderSystem32Ratio' : int(df['Name'].str.lower().str.startswith('\\windows\\system32').sum()),
+        'filescan.adsCount' : int(df['Name'].str.contains(r'\$DATA', regex=True).sum())
+    })
+
+    return features
+
 def extract_getsids_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
+    df = pd.read_json(jsondump)
+    features = {
         'getsids.nSIDcalls': df.SID.size,                                                       #Number of Security Identifier calls
         'getsids.nProc': df.PID.unique().size,                                                  #Number of processes
         'getsids.nDiffName': df.Name.unique().size,                                             #Number of Names
         'getsids.n_diff_sids': df.SID.unique().size,                                            #Number of Unique SIDs
         'getsids.avgSIDperProc': df.SID.size/df.PID.unique().size,                              #Avg number of SID per Process        
     }
+    features.update({
+        'getsids.adminSidInUserPID':    int(((df.PID > 1000) & df.SID.str.endswith('-544')).sum()),
+        'getsids.nullNameRatio':        float(df.Name.isna().mean()),
+        'getsids.serviceSidCount':      int(df.SID.str.contains(r'^S-1-5-80-').sum()),
+        'getsids.foreignAuthorityPct':  float((df.SID.str.split('-').str[2] != '5').mean()),
+        'getsids.maxSidsSingleProc':    int(df.groupby('PID').size().max()),
+    })
 
+    return features
+
+#TODO Unknown features in 
 def extract_mbrscan_features(jsondump):
     df=pd.read_json(jsondump)
     return{
@@ -1427,6 +1475,8 @@ def extract_mbrscan_features(jsondump):
         'mbrscan.bootable': df.Bootable.size - df.Bootable.isna().size                          #Numner of bootable 
     }
 
+
+#TODO   memory dumping in the folder
 def extract_memmap_features(jsondump):
     df=pd.read_json(jsondump)
     try:
@@ -1444,6 +1494,7 @@ def extract_memmap_features(jsondump):
         'memmap.AvgChildren': c     
     }
 
+# TODO not in volatility3 plugins
 def extract_mftscan_features(jsondump):
     df=pd.read_json(jsondump)
     return{
@@ -1461,26 +1512,52 @@ def extract_mftscan_features(jsondump):
         'mftscan.AvgChildren': df['__children'].apply(len).mean()
     }
 
+#TODO FIX THE .DLL EXTENTION
 def extract_modscan_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'modscan.nMod': len(df),   #List of Loaded Kernel Modules #113
         'modscan.nUniqueExt': len(df['Name'].str.extract(r'\.(\w+)$')[0].str.lower().unique()) - 1, 
-        'modscan.nDLL': len(df[df['Name'].str.endswith('.dll','.DLL')]),
-        'modscan.nSYS': len(df[df['Name'].str.endswith('.sys','.SYS')]),
-        'modscan.nEXE': len(df[df['Name'].str.endswith('.exe','.EXE')]),
-        'modscan.nOthers': len(df) - len(df[df['Name'].str.endswith('.dll','.DLL')]) - len(df[df['Name'].str.endswith('.sys','.SYS')]) - len(df[df['Name'].str.endswith('.exe','.EXE')]),
+        # 'modscan.nDLL': len(df[df['Name'].str.endswith('.dll','.DLL')]),
+        # 'modscan.nSYS': len(df[df['Name'].str.endswith('.sys','.SYS')]),
+        # 'modscan.nEXE': len(df[df['Name'].str.endswith('.exe','.EXE')]),
+        # 'modscan.nOthers': len(df) - len(df[df['Name'].str.endswith('.dll','.DLL')]) - len(df[df['Name'].str.endswith('.sys','.SYS')]) - len(df[df['Name'].str.endswith('.exe','.EXE')]),
         'modscan.AvgSize': df['Size'].mean(),
         'modscan.MeanChildExist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).mean(), # CHIld exist 1 else 0
         'modscan.FO_Enabled': len(df[df['File output'] == 'Enabled'])
     }
+    
+    features.update({
+        'modscan.offPathCount': int((~df['Path'].str.lower().fillna('').str.startswith('\\systemroot\\')).sum()),                                       # outside SystemRoot
+        'modscan.sizeStddev': float(df['Size'].std()),                                                        # size σ
+        'modscan.dupBaseCnt': int(df['Base'].value_counts().gt(1).sum()),                                     # overlapping bases
+        'modscan.nameEntropyMean': float(df['Name'].dropna().apply(char_entropy).mean()),                     # mean Name entropy
+        'modscan.unknownExtCount': int((~df['Name'].dropna().str.extract(r'\.(\w+)$')[0].str.lower().isin({'sys','dll','exe'})).sum()),               # extensions ≠ sys/dll/exe
+    })
+    
+    return features
 
 def extract_mutantscan_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'mutantscan.nMutantObjects': len(df),
-        'mutantscan.nNamedMutant': df['Name'].isna().sum() 
+        'mutantscan.nNamedMutant': int(df['Name'].isna().sum()) 
     }
+    
+    features.update({
+        'mutantscan.nullNameCount'         : int(df['Name'].isna().sum()),
+        'mutantscan.smPrefixRatio'         : float(df['Name'].str.startswith('SM0:', na=False).mean()),
+        'mutantscan.wilErrorCount'         : int(df['Name'].str.contains('WilError', na=False).sum()),
+        'mutantscan.dbwinCount'            : int(df['Name'].str.contains('DBWinMutex', na=False).sum()),
+        'mutantscan.officeClickRunCount'   : int(df['Name'].str.contains('ClickToRun|Office', na=False).sum()),
+        'mutantscan.nameEntropyMean'       : float(df['Name'].dropna().apply(char_entropy).mean()),
+        'mutantscan.nonAsciiNameCount'     : int(df['Name'].dropna().apply(lambda s: any(ord(c)>127 for c in s)).sum()),
+        'mutantscan.duplicateNameRatio'    : float((len(df)-df['Name'].nunique(dropna=True))/len(df)),
+        'mutantscan.avgNameLen'            : float(df['Name'].dropna().str.len().mean()),
+        'mutantscan.nullOffsetCount'       : int(df['Offset'].isna().sum() + (df['Offset']==0).sum())
+    })
+    return features
+
 
 def extract_netscan_features(jsondump):
     df=pd.read_json(jsondump)
@@ -1523,14 +1600,24 @@ def extract_netstat_features(jsondump):
 
 def extract_poolscanner_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'poolscanner.nPool': len(df),
         'poolscanner.nUniquePool': df.Tag.unique().size,
     }
+    
+    features.update({
+        'poolscanner.tag_entropy_mean': float(df['Tag'].dropna().apply(char_entropy).mean()),
+        'poolscanner.driver_obj_ratio': float((df['Tag'].str.contains(r'\_DRIVER_OBJECT', regex=True).sum() / len(df))),
+        'poolscanner.file_obj_ratio': float((df['Tag'].str.contains(r'\_FILE_OBJECT', regex=True)).sum() / len(df)),
+        'poolscanner.null_name_ratio': float(df['Name'].isna().mean()),
+        'poolscanner.top_tag': df['Tag'].mode().iat[0] if not df['Tag'].mode().empty else None
+    })
+    
+    return features
 
 def extract_privileges_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'privileges.nTotal': len(df),
         'privileges.nUniquePrivilege': df.Privilege.nunique(),
         'privileges.nPID': df.PID.nunique(),
@@ -1539,43 +1626,157 @@ def extract_privileges_features(jsondump):
         'privileges.nAtt_P': len(df[df["Attributes"]=="Present"]),
         'privileges.nAtt_PE': len(df[df["Attributes"]=="Present,Enabled"]),
         'privileges.nAtt_PED': len(df[df["Attributes"]=="Present,Enabled,Default"]),
-        'privileges.nAtt_NaN': df['Attributes'].isna().sum() 
+        'privileges.nAtt_NaN': int(df['Attributes'].isna().sum())
     }
 
+    features.update({
+        'privileges.rarePrivCount': int(df.Privilege.str.contains("SeRel|SeTcb|SeLoad|SeDebug|Assign").sum()),
+        'privileges.nullNameRatio': float(df.Privilege.isna().mean()),
+        'privileges.highPrivProcRatio': float((df.groupby("PID")["Privilege"].apply(lambda x: x.str.contains("Tcb|TcbPrivilege").sum() > 0)).mean()),
+        'privileges.maxPrivsInProc': int(df.groupby("PID").size().max())
+    })
+    
+    return features
+
 def extract_pstree_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
+
+    # df = pd.read_json(jsondump)
+    data = json.load(jsondump)
+    df = pd.DataFrame(data)
+
+    def get_max_depth(node):
+        if not node.get('__children'):
+            return 1
+        return 1 + max(get_max_depth(child) for child in node['__children'])
+
+    max_depth = max(get_max_depth(proc) for proc in data) if data else 0
+
+    # Orphan ratio
+    orphan_ratio = len([proc for proc in data if proc.get("PPID") in (None, 0)]) / len(data) if data else 0
+
+    # Average branching factor
+    def collect_branching_factors(nodes):
+        factors = []
+        for node in nodes:
+            children = node.get('__children', [])
+            factors.append(len(children))
+            factors.extend(collect_branching_factors(children))
+        return factors
+
+    all_branches = collect_branching_factors(data)
+    avg_branching_factor = np.mean(all_branches) if all_branches else 0
+
+    # Cross-session edges
+    def count_cross_session_edges(node, parent_sid):
+        count = 0
+        sid = node.get("SessionId")
+        children = node.get("__children", [])
+        for child in children:
+            child_sid = child.get("SessionId")
+            if sid is not None and child_sid is not None and sid != child_sid:
+                count += 1
+            count += count_cross_session_edges(child, sid)
+        return count
+
+    cross_session_edges = sum(count_cross_session_edges(proc, proc.get("SessionId")) for proc in data)
+
+    features = {
         'pstree.nTree': len(df),
         'pstree.nHandles': len(df) - df['Handles'].isna().sum(),
         'pstree.nPID': df.PID.nunique(),
         'pstree.nPPID': df.PPID.nunique(),
         'pstree.AvgThreads': df.Threads.mean(),
-        'pstree.nWow64': len(df[df["Wow64"]=="True"]),
+        'pstree.nWow64': len(df[df["Wow64"] == True]),
         'pstree.AvgChildren': df['__children'].apply(len).mean()
     }
 
+    features.update({
+        'pstree.max_depth': max_depth,
+        'pstree.orphan_ratio': orphan_ratio,
+        'pstree.avg_branching_factor': avg_branching_factor,
+        'pstree.cross_session_edges': cross_session_edges
+    })
+
+    return features
+
+# def extract_pstree_features(jsondump):
+#     df=pd.read_json(jsondump)
+#     return{
+#         'pstree.nTree': len(df),
+#         'pstree.nHandles': len(df) - df['Handles'].isna().sum(),
+#         'pstree.nPID': df.PID.nunique(),
+#         'pstree.nPPID': df.PPID.nunique(),
+#         'pstree.AvgThreads': df.Threads.mean(),
+#         'pstree.nWow64': len(df[df["Wow64"]=="True"]),
+#         'pstree.AvgChildren': df['__children'].apply(len).mean()
+#     }
+
 def extract_registry_certificates_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'registry.certificates.nCert': len(df),
         'registry.certificates.nID_Auto': len(df[df["Certificate ID"]=="AutoUpdate"]),
         'registry.certificates.nID_Protected': len(df[df["Certificate ID"]=="ProtectedRoots"]),
         'registry.certificates.nID_Others': len(df[~df['Certificate ID'].isin(['AutoUpdate','ProtectedRoots'])]) #174
     }
 
+    authroot_auto = df[(df["Certificate section"] == "AuthRoot") & (df["Certificate ID"] == "AutoUpdate")]
+    root_store = df[df["Certificate section"] == "ROOT"]
+    ca_store = df[df["Certificate section"] == "CA"]
+    authroot_ids = df[df["Certificate section"] == "AuthRoot"].set_index("Certificate ID")[["Certificate name", "Certificate path"]]
+    ca_ids = ca_store.set_index("Certificate ID")[["Certificate name", "Certificate path"]]
+
+    intersect_ids = set(authroot_ids.index).intersection(ca_ids.index)
+    mismatch_count = 0
+    for cert_id in intersect_ids:
+        auth = authroot_ids.loc[cert_id]
+        ca = ca_ids.loc[cert_id]
+        # Handle duplicates
+        if isinstance(auth, pd.DataFrame) or isinstance(ca, pd.DataFrame):
+            mismatch_count += 1
+        elif auth["Certificate name"] != ca["Certificate name"] or auth["Certificate path"] != ca["Certificate path"]:
+            mismatch_count += 1
+
+    features.update({
+        'registry.certificates.disallowed_count' : df[df["Certificate section"] == "Disallowed"].shape[0],
+        'registry.certificates.duplicate_autoupdate_entries' : int(authroot_auto.duplicated(subset=["Certificate ID", "Certificate section", "Certificate name", "Certificate path"]).sum()),
+        'registry.certificates.null_name_root_ratio': float(root_store["Certificate name"].isna().mean() if not root_store.empty else 0),
+        'registry.certificates.ca_cross_store_mismatch' : int(mismatch_count)
+    })
+    
+    return features
+
+
 def extract_registry_hivelist_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'registry.hivelist.nFiles': len(df),
         'registry.hivelist.nFO_Enabled': len(df) - len(df[df["File output"]=="Disabled"])
     }
 
+    features.update({
+        'registry.hivelist.empty_path_entries': int((df["FileFullPath"] == "").sum()),
+        'registry.hivelist.duplicate_paths': int(df["FileFullPath"].duplicated().sum()),
+        'registry.hivelist.user_hive_count': int(df["FileFullPath"].str.contains(r"NTUSER|UsrClass", case=False, na=False).sum()),
+        'registry.hivelist.offset_gap_stddev': float(np.diff(df["Offset"].dropna().sort_values().values).std() if len(df) > 1 else 0)
+    })
+    return features
+
+#TODO HIVELIST IS NEEDED cross plugin
 def extract_registry_hivescan_features(jsondump):
     df=pd.read_json(jsondump)
-    return{
+    features = {
         'registry.hivescan.nHives': len(df),
         'registry.hivescan.Children_exist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).sum()  
     }
+
+    features.update({
+        # 'hivescan.orphan_offset_count': int(len(df) - df["Offset"].isin(df["Offset"].dropna().unique()).sum()),
+        'hivescan.too_high_offset_ratio': float((df["Offset"] > 0x7FFFFFFFFFFF).mean()),
+        'hivescan.offset_entropy': float(shannon_entropy(df['Offset']))
+    })
+
+    return features
 
 def extract_registry_printkey_features(jsondump):
     df=pd.read_json(jsondump)

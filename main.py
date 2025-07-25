@@ -6,9 +6,14 @@ from utils import *
 
 
 
-def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_path):
+def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_path, drop_list):
     features = {}
     print('=> Outputting to', CSVoutput_path)
+
+    dropped_modules = set()
+    if drop_list:
+        dropped_modules = set(map(str.strip, drop_list.split(',')))
+        dropped_modules = [str(module).lower() for module in dropped_modules]        
 
     with tempfile.TemporaryDirectory() as workdir:
         vol = functools.partial(invoke_volatility3, volatility_path, memdump_path)
@@ -31,6 +36,9 @@ def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_p
 
        
         for module, extractor in VOL_MODULES.items():
+            if module.lower() in dropped_modules:
+                print(f'=> Skipping module: {module}')
+                continue
             print('=> Executing Volatility module', repr(module))
             output_file_path = os.path.join(workdir, module)
             vol(module, output_file_path)
@@ -60,12 +68,12 @@ def parse_args():
     p.add_argument('-f','--memdump',default=None, help='Path to folder/directory which has all memdumps',required = True)
     p.add_argument('-o', '--output', default=None, help='Path to the folder where to output the CSV',required = True)
     p.add_argument('-V', '--volatility', default=None, help='Path to the vol.py file in Volatility folder including the extension .py',required = True)
+    p.add_argument('-D', '--drop', default=None, help='Plugin names to drop from the features list',required = False)
     return p, p.parse_args()
 
 
 if __name__ == '__main__':
     p, args = parse_args()
-
     #print(args.memdump)
     folderpath = str(args.memdump)
     file_list = sorted(os.listdir(folderpath), key=lambda x: -os.path.getmtime(os.path.join(folderpath, x)), reverse=True)
@@ -79,4 +87,4 @@ if __name__ == '__main__':
         #print(file_path)
 
         if (file_path).endswith('.raw') or (file_path).endswith('.mem') or (file_path).endswith('.vmem') or (file_path).endswith('.mddramimage'):
-            extract_all_features_from_memdump((file_path), args.output, args.volatility)
+            extract_all_features_from_memdump((file_path), args.output, args.volatility, args.drop)
