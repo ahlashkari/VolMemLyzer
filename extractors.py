@@ -74,25 +74,39 @@ def extract_bigpools_features(jsondump):
 
 def extract_callbacks_features(jsondump):
     df = pd.read_json(jsondump)
-    return {
-        'callbacks.ncallbacks': df.Callback.size,                                               #Number of callbacks
-        'callbacks.distinct_modules'   : df['Module'].nunique(),
-        'callbacks.max_per_module'     : float( round(df.groupby('Module').size().max() / df.shape[0], 4)),
-        'callbacks.generic_kernel_count' : len(df[df['Type'] == 'GenericKernelCallback']),
-        'callbacks.no_symbol_count'    : len(df[df['Symbol'].isna()]),  
-        'callbacks.nNoDetail': len(df[df["Detail"]=='None']),                                   #Number of callbacks with no detail
-        'callbacks.nBugCheck': len(df[df["Type"]=='KeBugCheckCallbackListHead']),               #Number of callback Type --> KeBugCheckCallbackListHead
-        'callbacks.nBugCheckReason': len(df[df["Type"]=='KeBugCheckReasonCallbackListHead']),   #Number of callback Type --> KeBugCheckReasonCallbackListHead
-        'callbacks.nCreateProc': len(df[df["Type"]=='PspCreateProcessNotifyRoutine']),          #Number of callback Type --> PspCreateProcessNotifyRoutine
-        'callbacks.nCreateThread': len(df[df["Type"]=='PspCreateThreadNotifyRoutine']),         #Number of callback Type --> PspCreateThreadNotifyRoutine
-        'callbacks.nLoadImg': len(df[df["Type"]=='PspLoadImageNotifyRoutine']),                 #Number of callback Type --> PspLoadImageNotifyRoutine
-        'callbacks.nRegisterCB': len(df[df["Type"]=='CmRegisterCallback']),                     #Number of callback Type --> CmRegisterCallback
-        'callback.nUnknownType': df.Callback.size - len(df[df["Type"]=='KeBugCheckCallbackListHead']) - len(df[df["Type"]=='CmRegisterCallback'])\
-                                                  - len(df[df["Type"]=='KeBugCheckReasonCallbackListHead']) - len(df[df["Type"]=='PspLoadImageNotifyRoutine'])\
-                                                  - len(df[df["Type"]=='PspCreateProcessNotifyRoutine']) - len(df[df["Type"]=='PspCreateThreadNotifyRoutine']),
-                                                                                                #Number of callback Type --> UNKNOWN
-                
+    keys = [
+        'callbacks.ncallbacks',     'callbacks.nNoDetail',      'callbacks.nBugCheck',
+        'callbacks.nBugCheckReason','callbacks.nCreateProc',    'callbacks.nCreateThread',
+        'callbacks.nLoadImg',       'callbacks.nRegisterCB',     # V2 features
+        'callbacks.distinctModules','callbacks.maxPerModule',   'callbacks.genericKernel',
+        'callbacks.noSymbol'        # New features
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    features = {
+        'callbacks.ncallbacks': total,
+        'callbacks.nNoDetail': int(df['Detail'].isna().sum()),
+        'callbacks.nBugCheck': int((df['Type'] == 'KeBugCheckCallbackListHead').sum()),
+        'callbacks.nBugCheckReason': int((df['Type'] == 'KeBugCheckReasonCallbackListHead').sum()),
+        'callbacks.nCreateProc': int((df['Type'] == 'PspCreateProcessNotifyRoutine').sum()),
+        'callbacks.nCreateThread': int((df['Type'] == 'PspCreateThreadNotifyRoutine').sum()),
+        'callbacks.nLoadImg': int((df['Type'] == 'PspLoadImageNotifyRoutine').sum()),
+        'callbacks.nRegisterCB': int((df['Type'] == 'CmRegisterCallback').sum()),
     }
+
+    # new metrics inlined
+    features.update({
+        'callbacks.distinctModules': df['Module'].nunique(),
+        'callbacks.maxPerModule': round(df.groupby('Module').size().max() / total, 4),
+        'callbacks.genericKernel': int((df['Type'] == 'GenericKernelCallback').sum()),
+        'callbacks.noSymbol': int(df['Symbol'].isna().sum())
+    })
+
+    return features
+
 
 
 def extract_cmdline_features(jsondump):
@@ -121,11 +135,6 @@ def extract_cmdline_features(jsondump):
 
 def extract_cmdscan_features(jsondump):
     """
-    Extracts per-console history metrics from `windows.cmdscan` JSON.
-
-    Returns
-    -------
-    dict
         cmdscan.nHistories        : total _COMMAND_HISTORY blocks
         cmdscan.nonZeroHist       : # blocks with CommandCount > 0
         cmdscan.maxCmds           : largest CommandCount observed
@@ -167,16 +176,13 @@ def extract_cmdscan_features(jsondump):
         cmd_counts.append(cmd_count)  
 
     cmd_counts = np.array(cmd_counts)
-    nNonZero = np.count_nonzero(cmd_counts)
-    MaxCmd = int(max(cmd_counts))
-    CmdCountRatio = float(mean(cmd_counts/cmd_max))
         
     return {
         'cmdscan.nHistories'   : nHistories,
-        'cmdscan.nonZeroHist'  : nNonZero,
-        'cmdscan.maxCmds'      : MaxCmd,
+        'cmdscan.nonZeroHist'  : np.count_nonzero(cmd_counts),
+        'cmdscan.maxCmds'      : int(max(cmd_counts)),
         'cmdscan.appMismatch'  : mismatch,
-        'cmdscan.cmdCountRatio': CmdCountRatio,
+        'cmdscan.cmdCountRatio': float(mean(cmd_counts/cmd_max)),
     }
 
 
@@ -277,52 +283,31 @@ def extract_deskscan_features(jsondump, pids):
       • deskscan.session0GuiCount     : rows where Session==0 AND Window Station=="WinSta0"
       • deskscan.topProcDesktopRatio  : max windows owned by one Process ÷ totalEntries
     """
-    df = pd.read_json(jsondump)  # reads the JSON array into a DataFrame :contentReference[oaicite:0]{index=0}
-
-    # empty‐output guard
+    df = pd.read_json(jsondump)  
+    keys = ['deskscan.totalEntries', 'deskscan.uniqueDesktops',
+            'deskscan.uniqueWinStations',  'deskscan.session0GuiCount',  
+            'deskscan.topProcDesktopRatio', "deskscan.nOrphanDesktops",
+            'deskscan.nondefaultdesktops']
+    
     if df.empty:
-        return {
-            'deskscan.totalEntries'        : 0,
-            'deskscan.uniqueDesktops'      : 0,
-            'deskscan.uniqueWinStations'   : 0,
-            'deskscan.session0GuiCount'    : 0,
-            'deskscan.topProcDesktopRatio' : 0.0,
-        }
+        return {k : None for k in keys}
 
     total = len(df)
-
-    #  Desktop spread
-    unique_desktops    = df['Desktop'].nunique()
-    unique_winstns     = df['Window Station'].nunique()
-
-    # Session-0 GUI check
-    sess0_gui = df[
-        (df['Session'] == 0) &
-        (df['Window Station'] == 'WinSta0')
-    ].shape[0]
-
-    #  Process diversity: who “owns” the most windows?
     proc_counts = df['Process'].value_counts()
     top_owner   = proc_counts.iloc[0] if not proc_counts.empty else 0
-    top_ratio   = top_owner / total if total else 0.0
 
-    # ── Orphan desktops ────────────────────────────────────────────────────────
+    # ── Orphan desktops ───────────
     defaults     = {"Default", "Winlogon"}
     unique_names = df["Desktop"].dropna().unique()
-    n_irrelevant     = sum(1 for name in unique_names if name not in defaults)
-    n_orphan     = sum(1 for pid in df['PID'].values if pid not in pids)
-
-    # …then in your return dict, add:
 
     return {
         'deskscan.totalEntries'        : total,
-        'deskscan.uniqueDesktops'      : unique_desktops,
-        'deskscan.uniqueWinStations'   : unique_winstns,
-        'deskscan.session0GuiCount'    : sess0_gui,
-        'deskscan.topProcDesktopRatio' : round(top_ratio, 4),
-        "deskscan.nOrphanDesktops": n_orphan,
-        'deskscan.nondefaultdesktops': n_irrelevant
-
+        'deskscan.uniqueDesktops'      : df['Desktop'].nunique(),
+        'deskscan.uniqueWinStations'   : df['Window Station'].nunique(),
+        'deskscan.session0GuiCount'    : df[(df['Session'] == 0) &  (df['Window Station'] == 'WinSta0')].shape[0],
+        'deskscan.topProcDesktopRatio' : float(top_owner / total if total else 0.0),
+        "deskscan.nOrphanDesktops": sum(1 for pid in df['PID'].values if pid not in pids),
+        'deskscan.nondefaultdesktops': sum(1 for name in unique_names if name not in defaults)
     }
 
 
@@ -350,8 +335,6 @@ def extract_devicetree_features(jsondump):
     })
     
     return features
-
-
 
 
 def extract_dlllist_features(jsondump):
@@ -578,97 +561,67 @@ def extract_getsids_features(jsondump):
     return features
 
 
-
+import pandas as pd
+import math
+from collections import Counter
 
 def extract_handles_features(jsondump):
     df = pd.read_json(jsondump)
-    try:
-        a = df.HandleValue.size                                #Total number of opened Handles
-        b = df.HandleValue.unique().size                #Total number of distinct Handle Values
-        c = df.PID.unique().size                                  #Number of processes with handles
-        d = df.GrantedAccess.unique().size                      #Number of distinct GrantedAccess
-        e = df.HandleValue.size/df.PID.unique().size#Average number of handles per process
-        f = len(df[df["Type"]=="Port"])                       #Number of Type of Handles --> Ports
-        g = len(df[df["Type"]=="Process"])                    #Number of Type of Handles --> Process
-        h = len(df[df["Type"]=="Thread"])                   #Number of Type of Handles --> Thread
-        i = len(df[df["Type"]=="Key"])                         #Number of Type of Handles --> Key
-        j = len(df[df["Type"]=="Event"])                     #Number of Type of Handles --> Event
-        k = len(df[df["Type"]=="File"])                      #Number of Type of Handles --> File
-        l = len(df[df["Type"]=="Directory"])                   #Number of Type of Handles --> Directory
-        m = len(df[df["Type"]=="Section"])                     #Number of Type of Handles --> Section
-        n = len(df[df["Type"]=="Desktop"])                    #Number of Type of Handles --> Desktop
-        o = len(df[df["Type"]=="Token"])                     #Number of Type of Handles --> Token
-        p = len(df[df["Type"]=="Mutant"])                   #Number of Type of Handles --> Mutant
-        q = len(df[df["Type"]=="KeyedEvent"])             #Number of Type of Handles --> KeyedEvent
-        r = len(df[df["Type"]=="SymbolicLink"])           #Number of Type of Handles --> SymbolicLink
-        s = len(df[df["Type"]=="Semaphore"])                #Number of Type of Handles --> Semaphore
-        t = len(df[df["Type"]=="WindowStation"])            #Number of Type of Handles --> WindowStation
-        u = len(df[df["Type"]=="Timer"])                     #Number of Type of Handles --> Timer
-        v = len(df[df["Type"]=="IoCompletion"])                 #Number of Type of Handles --> IoCompletion
-        w = len(df[df["Type"]=="WmiGuid"])                     #Number of Type of Handles --> WmiGuid
-        x = len(df[df["Type"]=="WaitablePort"])           #Number of Type of Handles --> WaitablePort
-        y = len(df[df["Type"]=="Job"])                         #Number of Type of Handles --> Job
-        z = df.HandleValue.size - len(df[df["Type"]=="Port"]) - len(df[df["Type"]=="Process"]) - len(df[df["Type"]=="Thread"]) - len(df[df["Type"]=="Key"])  \
-                                                    - len(df[df["Type"]=="Event"]) - len(df[df["Type"]=="File"]) - len(df[df["Type"]=="Directory"]) - len(df[df["Type"]=="Section"])\
-                                                    - len(df[df["Type"]=="Desktop"]) - len(df[df["Type"]=="Token"]) - len(df[df["Type"]=="Mutant"]) - len(df[df["Type"]=="KeyedEvent"])\
-                                                    - len(df[df["Type"]=="Semaphore"]) - len(df[df["Type"]=="WindowStation"]) - len(df[df["Type"]=="Timer"]) - len(df[df["Type"]=="IoCompletion"])\
-                                                    - len(df[df["Type"]=="WaitablePort"]) - len(df[df["Type"]=="Job"]) - len(df[df["Type"]=="SymbolicLink"]) - len(df[df["Type"]=="WmiGuid"])
-    except:
-        a = None
-        b = None
-        c = None
-        d = None
-        e = None
-        f = None        
-        g = None
-        h = None
-        i = None
-        j = None
-        k = None
-        l = None
-        m = None
-        n = None
-        o = None
-        p = None
-        q = None
-        r = None
-        s = None
-        t = None
-        u = None
-        v = None
-        w = None
-        x = None
-        y = None
-        z = None
-                                                                                #Number of Type of Handles --> Unknown 
-    return{
-        'handles.nHandles': a,
-        'handles.distinctHandles': b,
-        'handles.nproc': c,
-        'handles.nAccess': d,
-        'handles.avgHandles_per_proc': e,
-        'handles.nTypePort': f,
-        'handles.nTyepProc': g,
-        'handles.nTypeThread': h,
-        'handles.nTypeKey': i,
-        'handles.nTypeEvent': j,
-        'handles.nTypeFile': k,
-        'handles.nTypeDir': l,
-        'handles.nTypeSec': m,
-        'handles.nTypeDesk': n,
-        'handles.nTypeToken': o,
-        'handles.nTypeMutant': p,
-        'handles.nTypeKeyEvent': q,
-        'handles.nTypeSymLink': r,
-        'handles.nTypeSemaph': s,
-        'handles.nTypeWinSta': t,
-        'handles.nTypeTimer': u,
-        'handles.nTypeIO': v,
-        'handles.nTypeWmi': w,
-        'handles.nTypeWaitPort': x,
-        'handles.nTypeJob': y,
-        'handles.nTypeUnknown': z  
+    keys = [
+        'handles.nHandles',           'handles.distinctHandles',      'handles.nproc',
+        'handles.nAccess',            'handles.avgHandles_per_proc',  'handles.nTypePort',
+        'handles.nTypeProc',          'handles.nTypeThread',          'handles.nTypeKey',
+        'handles.nTypeEvent',         'handles.nTypeFile',            'handles.nTypeDir',
+        'handles.nTypeSec',           'handles.nTypeDesk',            'handles.nTypeToken',
+        'handles.nTypeMutant',        'handles.nTypeKeyEvent',        'handles.nTypeSymLink',
+        'handles.nTypeSemaph',        'handles.nTypeWinSta',          'handles.nTypeTimer',
+        'handles.nTypeIO',            'handles.nTypeWmi',             'handles.nTypeWaitPort',
+        'handles.nTypeJob',           # V2 features
+        'handles.privHighAccessPct',  'handles.nullNameFileRatio',    'handles.tokenHandlesUserProcs',
+        'handles.maxHandlesOneProc',  'handles.handleEntropy'         # New features
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    features = {
+        'handles.nHandles': len(df),
+        'handles.distinctHandles': df.HandleValue.nunique(),
+        'handles.nproc': df.PID.nunique(),
+        'handles.nAccess': df.GrantedAccess.nunique(),
+        'handles.avgHandles_per_proc': len(df) / df.PID.nunique(),
+        'handles.nTypePort': int((df['Type'] == 'Port').sum()),
+        'handles.nTypeProc': int((df['Type'] == 'Process').sum()),
+        'handles.nTypeThread': int((df['Type'] == 'Thread').sum()),
+        'handles.nTypeKey': int((df['Type'] == 'Key').sum()),
+        'handles.nTypeEvent': int((df['Type'] == 'Event').sum()),
+        'handles.nTypeFile': int((df['Type'] == 'File').sum()),
+        'handles.nTypeDir': int((df['Type'] == 'Directory').sum()),
+        'handles.nTypeSec': int((df['Type'] == 'Section').sum()),
+        'handles.nTypeDesk': int((df['Type'] == 'Desktop').sum()),
+        'handles.nTypeToken': int((df['Type'] == 'Token').sum()),
+        'handles.nTypeMutant': int((df['Type'] == 'Mutant').sum()),
+        'handles.nTypeKeyEvent': int((df['Type'] == 'KeyedEvent').sum()),
+        'handles.nTypeSymLink': int((df['Type'] == 'SymbolicLink').sum()),
+        'handles.nTypeSemaph': int((df['Type'] == 'Semaphore').sum()),
+        'handles.nTypeWinSta': int((df['Type'] == 'WindowStation').sum()),
+        'handles.nTypeTimer': int((df['Type'] == 'Timer').sum()),
+        'handles.nTypeIO': int((df['Type'] == 'IoCompletion').sum()),
+        'handles.nTypeWmi': int((df['Type'] == 'WmiGuid').sum()),
+        'handles.nTypeWaitPort': int((df['Type'] == 'WaitablePort').sum()),
+        'handles.nTypeJob': int((df['Type'] == 'Job').sum()),
     }
+
+    features.update({
+        'handles.privHighAccessPct': round((df.GrantedAccess > 0x1FFFFF).mean(), 4),
+        'handles.nullNameFileRatio': float(len(df[(df['Type'] == 'File') & df['Name'].isna()]) 
+                                           / len(df[df['Type'] == 'File'])),
+        'handles.tokenHandlesUserProcs': int(((df['Type'] == 'Token') & (df['Process'] != 'System')).sum()),
+        'handles.maxHandlesOneProc': int(df.groupby('PID').size().max()),
+        'handles.handleEntropy': shannon_entropy(''.join(df['Name'].dropna().astype(str)))
+    })
+
+    return features
 
 def extract_winInfo_features(jsondump):
     df = pd.read_json(jsondump)
@@ -715,10 +668,6 @@ def extract_iat_features(jsondump):
 
 def extract_joblinks_features(jsondump):
     """
-    Extracts behavioural metrics from `windows.joblinks` output.
-
-    Returns
-    -------
     dict with keys:
         joblinks.nJobObjs           : unique Job objects  (JobLink is null)
         joblinks.linkedProcRatio    : #PIDs with JobLink == 'Yes' / total
@@ -730,18 +679,14 @@ def extract_joblinks_features(jsondump):
     
     flat = list(flatten_records(data))
     if not flat:        # keep columns stable on empty output
-        return {
-            'joblinks.nJobObjs'         : 0,
-            'joblinks.linkedProcRatio'  : 0.0,
-            'joblinks.sessMismatchCount': 0,
-            'joblinks.highActiveSkew'   : 0,
-            'joblinks.nameEntropyMean'  : 0.0,
-        }
+        return ['joblinks.nJobObjs',
+            'joblinks.linkedProcRatio' ,
+            'joblinks.sessMismatchCount',
+            'joblinks.highActiveSkew' ,
+            'joblinks.nameEntropyMean' ]
 
-    # --- pre-compute helpers -------------------------------------------------
     total_rows   = len(flat)
     linked_rows  = sum(1 for r in flat if str(r.get("JobLink")).lower() == "yes")
-    sess_mismatch= sum(1 for r in flat if r.get("JobSess") != r.get("Sess"))
 
     high_skew    = 0
     for r in flat:
@@ -752,52 +697,89 @@ def extract_joblinks_features(jsondump):
                 high_skew += 1
 
     name_entropy = [char_entropy(str(r.get("Name", ""))) for r in flat]
-    name_entropy_mean = sum(name_entropy) / total_rows
-
-    # Job objects = top-level rows (JobLink is null)
     n_jobobjs = sum(1 for r in flat if r.get("JobLink") in (None, "", "null"))
-
     linked_ratio = linked_rows / total_rows if total_rows else 0.0
 
-    # --- package -------------------------------------------------------------
     return {
         'joblinks.nJobObjs'         : n_jobobjs,
         'joblinks.linkedProcRatio'  : round(linked_ratio, 4),
-        'joblinks.sessMismatchCount': sess_mismatch,
+        'joblinks.sessMismatchCount': sum(1 for r in flat if r.get("JobSess") != r.get("Sess")),
         'joblinks.highActiveSkew'   : high_skew,
-        'joblinks.nameEntropyMean'  : round(name_entropy_mean, 4),
+        'joblinks.nameEntropyMean'  : float(sum(name_entropy) / total_rows),
     }
 
 
 def extract_ldrmodules_features(jsondump):
     df = pd.read_json(jsondump)
-    return {
-        'ldrmodules.total': df.Base.size,                                       #Number of total modules
-        'ldrmodules.not_in_load': len(df[df["InLoad"]==False]),                 #Number of modules missing from load list
-        'ldrmodules.not_in_init': len(df[df["InInit"]==False]),                 #Number of modules missing from init list
-        'ldrmodules.not_in_mem': len(df[df["InMem"]==False]),                   #Number of modules missing from mem list
-	    'ldrmodules.nporc': df.Pid.unique().size,                               #Number of processes with modules in memory
-        'ldrmodules.not_in_load_avg': len(df[df["InLoad"]==False])/df.Base.size,#Avg number of modules missing from load list
-        'ldrmodules.not_in_init_avg': len(df[df["InInit"]==False])/df.Base.size,#Avg number of modules missing from init list
-        'ldrmodules.not_in_mem_avg': len(df[df["InMem"]==False])/df.Base.size,  #Avg number of modules missing from mem list
+    keys = [
+        'ldrmodules.total',     'ldrmodules.not_in_load',    'ldrmodules.not_in_init',
+        'ldrmodules.not_in_mem', 'ldrmodules.memOnlyRatio',   'ldrmodules.suspPathCount',
+        'ldrmodules.nonDllPct',  'ldrmodules.nameEntropyMean'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    names = df['MappedPath'].dropna().apply(lambda p: os.path.basename(p))
+
+    features = {
+        'ldrmodules.total':           len(df),
+        'ldrmodules.not_in_load':     int((df['InLoad'] == False).sum()),
+        'ldrmodules.not_in_init':     int((df['InInit'] == False).sum()),
+        'ldrmodules.not_in_mem':      int((df['InMem'] == False).sum()),
+        'ldrmodules.nproc':           df.Pid.nunique(),
+        'ldrmodules.not_in_load_avg': float((df['InLoad'] == False).mean()),
+        'ldrmodules.not_in_init_avg': float((df['InInit'] == False).mean()),
+        'ldrmodules.not_in_mem_avg':  float((df['InMem'] == False).mean()),
     }
 
+    features.update({
+        'ldrmodules.memOnlyRatio':    float(((df['InMem'] & ~df['InLoad'] & ~df['InInit']).mean())),
+        'ldrmodules.suspPathCount':   int((~df['MappedPath'].str.lower().str.startswith(r'\\windows\\')).sum()),
+        'ldrmodules.nonDllPct':       float((~df['MappedPath'].str.lower().str.endswith('.dll')).mean()),
+    })
+
+    return features
 
 
 def extract_malfind_features(jsondump):
     df = pd.read_json(jsondump)
-    return {                                                                        
-        'malfind.ninjections': df.CommitCharge.size,                              #Number of hidden code injections found by malfind
-	'malfind.commitCharge': df.CommitCharge.sum(),                            #Sum of Commit Charges over time                                
-	'malfind.protection': len(df[df["Protection"]=="PAGE_EXECUTE_READWRITE"]),#Number of injections with all permissions 
-	'malfind.uniqueInjections': df.PID.unique().size,                         #Number of unique injections
-        'malfind.avgInjec_per_proc': df.PID.size/df.PID.unique().size,            #Average number of injections per process
-        'malfind.tagsVad': len(df[df["Tag"]=="Vad"]),                             #Number of Injections tagged as Vad
-        'malfind.tagsVads': len(df[df["Tag"]=="Vads"]),                           #Number of Injections tagged as Vads
-        'malfind.aveVPN_diff': df['End VPN'].sub(df['Start VPN']).sum()           #Avg VPN size of injections
+    keys = [
+        'malfind.ninjections',     'malfind.commitCharge',    'malfind.protection',
+        'malfind.uniqueInjections','malfind.avgInjec_per_proc','malfind.tagsVad',
+        'malfind.tagsVads',        'malfind.aveVPN_diff',      # V2 features
+        'malfind.maxVADsize',      'malfind.meanVADsize',     'malfind.shellJumpRatio',
+        'malfind.nullPct',         'malfind.RWXratio'          # New features
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    vpn_sizes = df['End VPN'] - df['Start VPN']
+
+    features = {
+        'malfind.ninjections':      total,
+        'malfind.commitCharge':     int(df['CommitCharge'].sum()),
+        'malfind.protection':       int((df['Protection'] == 'PAGE_EXECUTE_READWRITE').sum()),
+        'malfind.uniqueInjections': df['PID'].nunique(),
+        'malfind.avgInjec_per_proc': float(total / df['PID'].nunique()),
+        'malfind.tagsVad':          int((df['Tag'] == 'Vad').sum()),
+        'malfind.tagsVads':         int((df['Tag'] == 'VadS').sum()),
+        'malfind.aveVPN_diff':      int(vpn_sizes.sum()),
     }
 
+    null_bytes = df['Hexdump'].str.findall(r'\b00\b').str.len().div(df['Hexdump'].str.split().str.len())
+    
+    features.update({
+        'malfind.maxVADsize':      int(vpn_sizes.max()),
+        'malfind.meanVADsize':     float(vpn_sizes.mean()),
+        'malfind.shellJumpRatio':  float(df['Disasm'].str.contains('jmp').mean()),
+        'malfind.nullPct':         float(null_bytes.mean()),
+        'malfind.RWXratio':        float((df['Protection'] == 'PAGE_EXECUTE_READWRITE').mean())
+    })
 
+    return features
 
 
 #TODO FIX THE .DLL EXTENTION
@@ -825,6 +807,36 @@ def extract_modscan_features(jsondump):
     
     return features
 
+def extract_mbrscan_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'mbrscan.nMBRentries',       'mbrscan.nDiskSig',            'mbrscan.nPartType',
+        'mbrscan.bootable_partitions','mbrscan.nUniqueBootcode',     'mbrscan.avg_partitions_per_mbr',
+        'mbrscan.avg_partition_size_mb','mbrscan.null_partition_size_pct','mbrscan.partition_type_diversity'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    # flatten all children into one DataFrame
+    children = pd.json_normalize(df['__children'].explode().dropna())
+
+    features = {
+        'mbrscan.nMBRentries'        : len(df),
+        'mbrscan.nDiskSig'           : df['Disk Signature'].nunique(),
+        'mbrscan.nPartType'          : df['PartitionType'].nunique(),
+    }
+
+    features.update({
+        'mbrscan.bootable_partitions'   : int(children['Bootable'].sum()),
+        'mbrscan.nUniqueBootcode'       : children['Bootcode MD5'].nunique(),
+        'mbrscan.avg_partitions_per_mbr': float(df['__children'].apply(len).mean()),
+        'mbrscan.avg_partition_size_mb' : float(children['SectorInSize'].dropna().mean() / (1024**2)),
+        'mbrscan.null_partition_size_pct': round(children['SectorInSize'].isna().mean(), 4),
+        'mbrscan.partition_type_diversity': children['PartitionType'].nunique()
+    })
+
+    return features
 
 def extract_modules_features(jsondump):
     """
@@ -875,26 +887,57 @@ def extract_mutantscan_features(jsondump):
     })
     return features
 
-
-
 def extract_netscan_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'netscan.nConn': len(df),
-        'netscan.nDistinctForeignAdd': df.ForeignAddr.unique().size,
-        'netscan.nDistinctForeignPort': df.ForeignPort.unique().size,
-        'netscan.nDistinctLocalAddr': df.LocalAddr.unique().size,
-        'netscan.nDistinctLocalPort': df.LocalPort.unique().size,
-        'netscan.nOwners': df.Owner.unique().size,
-        'netscan.nDistinctProc': df.PID.unique().size,
-        'netscan.nListening': len(df[df['State'].isin(['LISTENING'])]),
-        'netscan.Proto_TCPv4': len(df[df["Proto"]=="TCPv4"]),
-        'netscan.Proto_TCPv6': len(df[df["Proto"]=="TCPv4"]),
-        'netscan.Proto_UDPv4': len(df[df["Proto"]=="UDPv4"]),
-        'netscan.Proto_UDPv6': len(df[df["Proto"]=="UDPv6"])
+    df = pd.read_json(jsondump)
+    keys = [
+        'netscan.nConn',               'netscan.nDistinctForeignAdd',  'netscan.nDistinctForeignPort',
+        'netscan.nDistinctLocalAddr',   'netscan.nDistinctLocalPort',   'netscan.nOwners',
+        'netscan.nDistinctProc',        'netscan.nListening',           'netscan.Proto_TCPv4',
+        'netscan.Proto_UDPv4',          'netscan.Proto_TCPv6',          'netscan.Proto_UDPv6',
+        'netscan.unownedConnCount',     'netscan.closedButUnowned',     'netscan.publicEstablished',
+        'netscan.highPortListenCount',  'netscan.ipv6Ratio',            'netscan.loopbackPairCount',
+        'netscan.duplicateListen'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    features = {
+        'netscan.nConn':               total,
+        'netscan.nDistinctForeignAdd': df.ForeignAddr.nunique(),
+        'netscan.nDistinctForeignPort':df.ForeignPort.nunique(),
+        'netscan.nDistinctLocalAddr':  df.LocalAddr.nunique(),
+        'netscan.nDistinctLocalPort':  df.LocalPort.nunique(),
+        'netscan.nOwners':             df.Owner.nunique(),
+        'netscan.nDistinctProc':       df.PID.nunique(),
+        'netscan.nListening':          int((df['State'] == 'LISTENING').sum()),
+        'netscan.Proto_TCPv4':         int((df['Proto'] == 'TCPv4').sum()),
+        'netscan.Proto_UDPv4':         int((df['Proto'] == 'UDPv4').sum()),
+        'netscan.Proto_TCPv6':         int((df['Proto'] == 'TCPv6').sum()),
+        'netscan.Proto_UDPv6':         int((df['Proto'] == 'UDPv6').sum()),
     }
 
+    private_re = re.compile(
+        r'^(?:10\.|172\.(?:1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.0\.0\.1|::1)', re.IGNORECASE)
+    public_established_mask =  (df['State'] == 'ESTABLISHED') & ~df['ForeignAddr'].str.match(private_re, na=False) 
+    
+    loopback_mask = (df.LocalAddr.isin(['127.0.0.1','::1'])& df.ForeignAddr.isin(['127.0.0.1','::1'])
+                    & (df.LocalAddr == df.ForeignAddr))
+    
+    duplicate_listen_mask = (df[df['State'] == 'LISTENING'].groupby(['LocalAddr','LocalPort']).size() > 1)
 
+    features.update({
+        'netscan.unownedConnCount':    int(((df.PID.isna()) | (df.Owner.isna())).sum()),
+        'netscan.closedButUnowned':    int(((df['State'] == 'CLOSED') & df.PID.isna()).sum()),
+        'netscan.publicEstablished':   float(public_established_mask.sum() / total),
+        'netscan.highPortListenCount': int(((df['State'] == 'LISTENING') & (df.LocalPort > 49152)).sum()),
+        'netscan.ipv6Ratio':           float(df['Proto'].str.endswith('v6').mean()),
+        'netscan.loopbackPairCount':   int((loopback_mask).sum()),
+        'netscan.duplicateListen':     int(duplicate_listen_mask.sum())
+    })
+
+    return features
 
 def extract_poolscanner_features(jsondump):
     df=pd.read_json(jsondump)
@@ -937,10 +980,51 @@ def extract_privileges_features(jsondump):
 
     return features
 
+def extract_pslist_features(jsondump):
+    df = pd.read_json(jsondump)
+
+    nproc          = len(df) 
+    pids           = df['PID'].values
+    nppid          = df.PPID.nunique()
+    avg_threads    = df.Threads.mean()
+    avg_handles    = df.Handles.mean()
+    nprocs64bit    = len(df[df["Wow64"] == True])
+    outfile        = nproc - len(df[df["File output"] == "Disabled"])
+
+
+    nproc = nppid = avg_threads = avg_handles = nprocs64bit = outfile = None
+
+    zombie_count   = len(df[df["ExitTime"].notna()])        # still resident but ExitTime recorded
+    wow64_ratio    = nprocs64bit / nproc if nproc else None
+
+    # Handles column can be null – cast safely
+    handles_numeric = pd.to_numeric(df["Handles"], errors="coerce")
+    restricted_pct  = (handles_numeric.lt(4).sum() / nproc) if nproc else None        
+
+    # User-land path heuristic: basename *not* living under Windows\ or Program Files\
+    def is_user_path(name):
+        name = str(name).lower()
+        return (not name.startswith("c:\\windows\\")
+                and not name.startswith("c:\\program files"))
+    user_path_ratio = df["ImageFileName"].apply(is_user_path).mean()
+
+    return [pids, {
+        # V2
+        "pslist.nproc"        : nproc,
+        "pslist.nppid"        : nppid,
+        "pslist.avg_threads"  : avg_threads,
+        "pslist.avg_handlers" : avg_handles,
+        "pslist.nprocs64bit"  : nprocs64bit,
+        "pslist.outfile"      : outfile,
+
+        "pslist.zombie_count"       : zombie_count,
+        "pslist.wow64_ratio"        : wow64_ratio,
+        "pslist.restricted_handles_pct": restricted_pct,
+        "pslist.user_path_ratio"    : user_path_ratio,
+    }]
+
 
 def extract_pstree_features(jsondump):
-
-    # df = pd.read_json(jsondump)
     data = json.load(jsondump)
     df = pd.DataFrame(data)
 
@@ -1000,23 +1084,143 @@ def extract_pstree_features(jsondump):
     return features
 
 
-#@@@@@@ PSSCAN  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+def extract_psscan_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'psscan.nEntries',           'psscan.nUniquePIDs',        'psscan.nUniqueNames',
+        'psscan.exit_time_ratio',    'psscan.wow64_ratio',        'psscan.avg_threads',
+        'psscan.handle_present_ratio','psscan.disabled_output_ratio','psscan.ppid_diversity',
+        'psscan.avg_offset',         'psscan.offset_std',         'psscan.child_present_ratio',
+        'psscan.avg_children',       'psscan.create_timespan_days'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    # prepare for multi-use calculations
+    df['CreateTime'] = pd.to_datetime(df['CreateTime'], errors='coerce')
+    df['ExitTime']   = pd.to_datetime(df['ExitTime'], errors='coerce')
+    child_counts     = df['__children'].apply(len)
+    total            = len(df)
+
+    features = {
+        'psscan.nEntries'     : total,
+        'psscan.nUniquePIDs'  : df['PID'].nunique(),
+        'psscan.nUniqueNames' : df['ImageFileName'].nunique()
+    }
+
+    features.update({
+        'psscan.exit_time_ratio'     : float(df['ExitTime'].notna().mean()),
+        'psscan.wow64_ratio'         : float(df['Wow64'].mean()),
+        'psscan.avg_threads'         : float(df['Threads'].mean()),
+        'psscan.handle_present_ratio': float(df['Handles'].notna().mean()),
+        'psscan.disabled_output_ratio': float(df['File output'].eq('Disabled').mean()),
+        'psscan.ppid_diversity'      : float(df['PPID'].nunique() / total),
+        'psscan.avg_offset'          : float(df['Offset(V)'].mean()),
+        'psscan.offset_std'          : float(df['Offset(V)'].std()),
+        'psscan.child_present_ratio' : float(child_counts.gt(0).mean()),
+        'psscan.avg_children'        : float(child_counts.mean()),
+        'psscan.create_timespan_days': int((df['CreateTime'].max() - df['CreateTime'].min()).days)
+    })
+
+    return features
 
 
+def extract_psxview_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'psxview.nEntries',        'psxview.nUniquePIDs',       'psxview.nUniqueNames',
+        'psxview.csrss_ratio',     'psxview.pslist_ratio',      'psxview.psscan_ratio',
+        'psxview.thrdscan_ratio',  'psxview.all_seen_ratio',    'psxview.none_seen_count',
+        'psxview.partial_seen_count','psxview.single_seen_count','psxview.exit_time_ratio',
+        'psxview.avg_offset',      'psxview.offset_std'
+    ]
 
-#@@@@@@ PSXVIEW  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    # normalize Exit Time to compute ratio of terminated entries
+    df['Exit Time'] = pd.to_datetime(df['Exit Time'], errors='coerce')
+    # count detections per row
+    detect_sum = df[['csrss', 'pslist', 'psscan', 'thrdscan']].sum(axis=1)
+
+    features = {
+        'psxview.nEntries'      : total,
+        'psxview.nUniquePIDs'   : df['PID'].nunique(),
+        'psxview.nUniqueNames'  : df['Name'].nunique()
+    }
+
+    features.update({
+        'psxview.csrss_ratio'       : float(df['csrss'].mean()),
+        'psxview.pslist_ratio'      : float(df['pslist'].mean()),
+        'psxview.psscan_ratio'      : float(df['psscan'].mean()),
+        'psxview.thrdscan_ratio'    : float(df['thrdscan'].mean()),
+        'psxview.all_seen_ratio'    : float((detect_sum == 4).mean()),
+        'psxview.none_seen_count'   : int((detect_sum == 0).sum()),
+        'psxview.partial_seen_count': int(detect_sum.between(1, 3).sum()),
+        'psxview.single_seen_count' : int((detect_sum == 1).sum()),
+        'psxview.exit_time_ratio'   : float(df['Exit Time'].notna().mean()),
+        'psxview.avg_offset'        : float(df['Offset(Virtual)'].mean()),
+        'psxview.offset_std'        : float(df['Offset(Virtual)'].std())
+    })
+
+    return features
+
+def extract_registry_amcache_features(jsondump):
+    df = pd.read_json(jsondump)
+
+    image_ts = pd.to_datetime(df['LastModifyTime']).max()
+    drv_mask = df['Path'].str.lower().str.contains(r'\\windows\\system32\\drivers')
+    vendor_counts = df.loc[drv_mask & (df['Company'] != 'Microsoft Corporation'), 'Company'] \
+                      .value_counts(normalize=True)
+    # print(vendor_counts)
+    svc_counts   = df['Service'].value_counts(normalize=True)
+
+    return {
+        'amcache.nEntries'               : len(df),
+        'amcache.nDistinctCompanies'     : df['Company'].nunique(),
+        'amcache.future_compile_ratio'   : float((pd.to_datetime(df['CompileTime']) > image_ts).mean()),
+        'amcache.null_install_time_count': int(df['InstallTime'].isna().sum()),
+        'amcache.non_ms_driver_entropy'  : float(shannon_entropy(vendor_counts)) if not vendor_counts.empty else None,
+        'amcache.service_name_entropy'   : float(shannon_entropy(svc_counts)) if not svc_counts.empty else None,
+        'amcache.unsigned_product_ratio' : float(df['ProductVersion'].isna().mean())
+    }
 
 
-#@@@@@@ registery.amcache  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+def extract_registry_printkey_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'registry.printkey.nKeys',          'registry.printkey.nDistinct',      'registry.printkey.nType_key',
+        'registry.printkey.nType_other',    'registry.printkey.Volatile_0',     'registry.printkey.Avg_Children',
+        'registry.printkey.volatile_ratio', 'registry.printkey.distinct_hives', 'registry.printkey.dword_ratio',
+        'registry.printkey.avg_name_len',   'registry.printkey.write_timespan_days'
+    ]
 
+    if df.empty:
+        return {k: None for k in keys}
 
+    total = len(df)
+    df['Last Write Time'] = pd.to_datetime(df['Last Write Time'])
+    
+    features = {
+        'registry.printkey.nKeys'       : total,
+        'registry.printkey.nDistinct'   : df['Name'].nunique(),
+        'registry.printkey.nType_key'   : int((df['Type']=='Key').sum()),
+        'registry.printkey.nType_other' : int((df['Type']!='Key').sum()),
+        'registry.printkey.Volatile_0'  : int((df['Volatile']==False).sum()),
+        'registry.printkey.Avg_Children': df['__children'].apply(len).mean()
+    }
 
+    features.update({
+        'registry.printkey.volatile_ratio'       : float((df['Volatile']==True).sum()/total),
+        'registry.printkey.distinct_hives'       : df['Hive Offset'].nunique(),
+        'registry.printkey.dword_ratio'          : float((df['Type']!='Key').sum()/total),
+        'registry.printkey.avg_name_len'         : float(df['Name'].str.len().mean()),
+        'registry.printkey.write_timespan_days'  : int((df['Last Write Time'].max() - df['Last Write Time'].min()).days)
+    })
+
+    return features
 
 
 def extract_registry_hivelist_features(jsondump):
@@ -1072,8 +1276,6 @@ def extract_registry_hivescan_features(jsondump):
     return features
 
 
-
-
 def extract_registry_certificates_features(jsondump):
     df=pd.read_json(jsondump)
     features = {
@@ -1109,17 +1311,89 @@ def extract_registry_certificates_features(jsondump):
     
     return features
 
+def extract_registry_userassist_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'registry.userassist.n',            'registry.userassist.nUnique',      'registry.userassist.Avg_Children',
+        'registry.userassist.path_DNE',     'registry.userassist.type_key',     'registry.userassist.type_other',
+        'registry.userassist.name_null_ratio','registry.userassist.zero_count_ratio','registry.userassist.avg_focus_count',
+        'registry.userassist.time_focused_present_ratio','registry.userassist.write_timespan_days'
+    ]
 
-#@@@@@@ simcache  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    if df.empty:
+        return {k: None for k in keys}
+
+    # prepare datetime
+    total = len(df)
+    df['Last Write Time'] = pd.to_datetime(df['Last Write Time'], errors='coerce')
+    child_counts = df['__children'].apply(len)
+
+    features = {
+        'registry.userassist.n'            : total,
+        'registry.userassist.nUnique'      : df['Hive Name'].nunique(),
+        'registry.userassist.Avg_Children' : float(df['__children'].apply(len).mean()),
+        'registry.userassist.path_DNE'     : int((df['Path'] == 'None').sum()),
+        'registry.userassist.type_key'     : int((df['Type'] == 'Key').sum()),
+        'registry.userassist.type_other'   : int((df['Type'] != 'Key').sum())
+    }
+
+    features.update({
+        'registry.userassist.name_null_ratio'             : float(df['Name'].isna().mean()),
+        'registry.userassist.zero_count_ratio'            : float(df['Count'].fillna(0).eq(0).mean()),
+        'registry.userassist.avg_focus_count'             : float(df['Focus Count'].dropna().mean()),
+        'registry.userassist.time_focused_present_ratio'  : float(df['Time Focused'].notna().mean()),
+        'registry.userassist.write_timespan_days'         : int((df['Last Write Time'].max() - df['Last Write Time'].min()).days),
+        'registry.userassist.child_present_ratio'        : float((child_counts.gt(0).sum() / total)),
+        'registry.userassist.max_children_count'         : int(child_counts.max())
+    })
+
+    return features
 
 
+def extract_shimcache_features(jsondump):
+    df = pd.read_json(jsondump)
+    if df.empty:
+        return {
+            'shimcache.nEntries':     None, 'shimcache.exec_flag_ratio':         None, 'shimcache.null_last_modified_ratio': None,
+            'shimcache.future_last_modified_ratio': None, 'shimcache.nDistinctPaths': None, 'shimcache.avg_children':           None
+        }
+    # reuseable series
+    flags = pd.to_numeric(df['Exec Flag'], errors='coerce')
+    lm = pd.to_datetime(df['Last Modified'], errors='coerce')
+    now = pd.Timestamp.utcnow()
+    return {
+        'shimcache.nEntries':                   len(df), 
+        'shimcache.exec_flag_ratio':            float(flags.eq(1).sum() / len(df)), 
+        'shimcache.null_last_modified_ratio':   float(lm.isna().sum() / len(df)),
+        'shimcache.future_last_modified_ratio': float(lm.gt(now).sum() / len(df)), 
+        'shimcache.nDistinctPaths':             df['File Path'].nunique(), 
+        'shimcache.avg_children':               df['__children'].apply(len).mean()
+    }
 
-#@@@@@@ skleton_key_check  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
+def extract_skeleton_key_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'skeleton_key.nKey',         'skeleton_key.nProcess',        'skeleton_key.Found_True',
+        'skeleton_key.Found_False',  'skeleton_key.rc4Hmac_decrypt_time'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    features = {
+        'skeleton_key.nKey'        : len(df),
+        'skeleton_key.nProcess'    : df['Process'].nunique(),
+        'skeleton_key.Found_True'  : int((df['Skeleton Key Found'] == True).sum()),
+        'skeleton_key.Found_False' : int((df['Skeleton Key Found'] == False).sum())
+    }
+
+    # new metrics inlined
+    features.update({
+        'skeleton_key.rc4Hmac_decrypt_time' : float(df['rc4HmacDecrypt'].mean())
+    })
+
+    return features
 
 
 #TODO Unknown features
@@ -1193,6 +1467,78 @@ def extract_ssdt_features(jsondump):
 
     return features
 
+def extract_sessions_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'sessions.nSessions',        'sessions.nProcess',             'sessions.nUsers',
+        'sessions.nType',            'sessions.child_present_count',  'sessions.valid_sid_ratio',
+        'sessions.type_present_ratio','sessions.user_session_ratio',   'sessions.top_type_ratio',
+        'sessions.create_timespan_days','sessions.dup_process_count'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    # prepare for multi-use calculations
+    df['Create Time'] = pd.to_datetime(df['Create Time'], errors='coerce')
+    child_counts = df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0)
+
+    total = len(df)
+    features = {
+        'sessions.nSessions'           : total,
+        'sessions.nProcess'            : df['Process'].nunique(),
+        'sessions.nUsers'              : df['User Name'].nunique(),
+        'sessions.nType'               : df['Session Type'].nunique(),
+        'sessions.child_present_count' : int(child_counts.gt(0).sum())
+    }
+
+    time_span_series = (df['Create Time'].max() - df['Create Time'].min())
+
+    features.update({
+        'sessions.valid_sid_ratio'        : float(df['Session ID'].notna().mean()),
+        'sessions.type_present_ratio'     : float(df['Session Type'].notna().mean()),
+        'sessions.user_session_ratio'     : float(df['User Name'].notna().mean()),
+        'sessions.top_type_ratio'         : float(df['Session Type'].value_counts(normalize=True).max()),
+        'sessions.create_timespan_days'   : int(time_span_series.days),
+        'sessions.dup_process_count'      : int((df['Process'].value_counts() > 1).sum())
+    })
+
+    return features
+
+
+def extract_scheduleduled_tasks_features(jsondump):
+    df = pd.read_json(jsondump)
+    now = pd.Timestamp.utcnow()
+
+    ts = lambda col: pd.to_datetime(df[col], errors='coerce')
+    lt = ts('Last Run Time')
+    lst_succ = ts('Last Successful Run Time')
+
+    total = len(df); enabled = df['Enabled'].eq(True).sum()
+    null_action = df['Action'].isna().sum(); never_run = lt.isna().sum()
+    future_run = (lt > now).sum()
+
+    trig = df['Trigger Type'].dropna().value_counts(normalize=True)
+    ctx  = df['Action Context'].dropna().value_counts(normalize=True)
+
+    return {
+        'scheduled.nTasks':              total,
+        'scheduled.enabled_ratio':       float(enabled/total),
+        'scheduled.null_action_count':   int(null_action),
+
+        'scheduled.never_run_count':     int(never_run),
+        'scheduled.future_run_count':    int(future_run),
+        'scheduled.distinct_triggers':   int(df['Trigger Type'].nunique()),
+
+        'scheduled.top_trigger_pct':     float(trig.iloc[0]) if not trig.empty else 0.0,
+        'scheduled.distinct_contexts':   int(df['Action Context'].nunique()),
+        'scheduled.top_context_pct':     float(ctx.iloc[0]) if not ctx.empty else 0.0,
+
+        'scheduled.null_last_succ_run':  int(lst_succ.isna().sum()),
+        'scheduled.mean_children':       float(df['__children'].apply(len).mean()),
+        'scheduled.distinct_actions':    int(df['Action Type'].nunique())
+    }
+
 
 
 def extract_svcscan_features(jsondump):
@@ -1255,35 +1601,117 @@ def extract_svclist_features(jsondump):
         "svclist.services_with_no_binary": int((df["Binary"].isna() & df['Binary (Registry)'].isna()).sum())
     }
 
+def extract_timers_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'timers.total_timers',            'timers.unique_modules_count',      'timers.timers_with_symbols',
+        'timers.timers_with_null_symbols','timers.periodic_timers_count',     'timers.signaled_timers_count',
+        'timers.high_periodic_timer_ms',  'timers.popfx_idle_reuse_count',    'timers.max_timers_per_module',
+        'timers.suspicious_module_timer_count'
+    ]
 
+    if df.empty:
+        return {k: None for k in keys}
 
-#@@@@@@ timers  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    total = len(df)
+    periods = df['Period(ms)']
+    periodic_mask = periods.gt(0)
+    susp = df['Module'].isin(['winfsp-x64','pdc','volsnap','netbt'])
+
+    return{
+        'timers.total_timers'               : total,
+        'timers.unique_modules_count'       : df['Module'].nunique(),
+        'timers.timers_with_symbols'        : int(df['Symbol'].notna().sum()),
+        'timers.timers_with_null_symbols'   : int(df['Symbol'].isna().sum()),
+        'timers.periodic_timers_count'      : int(periodic_mask.sum()),
+        'timers.signaled_timers_count'      : int((df['Signaled'] == 'Yes').sum()),
+        'timers.high_periodic_timer_ms'     : float(periods[periodic_mask].max()) if periodic_mask.any() else None,
+        'timers.popfx_idle_reuse_count'     : int((df['Symbol'] == 'PopFxIdleTimeoutDpcRoutine').sum()),
+        'timers.max_timers_per_module'      : int(df.groupby('Module').size().max()),
+        'timers.suspicious_module_timer_count': int(susp.sum())
+    }
 
 def extract_symlinkscan_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'symlinkscan.nLinks': len(df),
-        'symlinkscan.nFrom': df["From Name"].nunique(),
-        'symlinkscan.nTo': df["To Name"].nunique(),
-        'symlinkscan.Avg_Children': df['__children'].apply(len).mean()
+    df = pd.read_json(jsondump)
+    keys = [
+        'symlinkscan.nLinks',            'symlinkscan.nFrom',                       'symlinkscan.nTo',
+        'symlinkscan.Avg_Children',      'symlinkscan.null_to_ratio',               'symlinkscan.duplicate_fromname_count',
+        'symlinkscan.globalroot_presence','symlinkscan.device_target_ratio',         'symlinkscan.offset_gap_stddev']
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    root_presence_mask = df['From Name'].str.upper().eq('GLOBALROOT').any() or df['To Name'].str.startswith("\\GLOBAL", na=False)
+
+    features = {
+        'symlinkscan.nLinks': int(total),
+        'symlinkscan.nFrom': int(df['From Name'].nunique()),
+        'symlinkscan.nTo': int(df['To Name'].nunique()),
+        'symlinkscan.Avg_Children': float(df['__children'].apply(len).mean())
+    }
+
+    features.update({
+        'symlinkscan.null_to_ratio': round((df['To Name'] == '').sum() / total, 4),
+        'symlinkscan.duplicate_fromname_count': int(df['From Name'].duplicated().sum()),
+        'symlinkscan.globalroot_presence': bool(root_presence_mask.any()),
+        'symlinkscan.device_target_ratio': round(df['To Name'].str.startswith("\\Device\\", na=False).sum() / total, 4),
+        'symlinkscan.offset_gap_stddev': float(df['Offset'].sort_values().diff().std())
+    })
+
+    return features
+
+
+#TODO requires cross-plugin comparison with Threads.json
+def extract_thrdscan_features(jsondump):
+    df = pd.read_json(jsondump)
+
+    # basic counts and ratios
+    null_startpath_ratio   = df['StartPath'].isna().mean()
+    null_createtime_ratio  = df['CreateTime'].isna().mean()
+    dup_startaddr_ratio    = (df.groupby(['PID','StartAddress'])
+                                .size()
+                                .gt(1)
+                                .sum() / len(df))
+    
+    only_scanner_count     = None  
+
+    return {
+        'thrdscan.nThreads':               len(df),           
+        'thrdscan.null_startpath_ratio':   float(null_startpath_ratio),
+        'thrdscan.null_createtime_ratio':  float(null_createtime_ratio),
+        'thrdscan.duplicate_startaddr_ratio': float(dup_startaddr_ratio),
+        'thrdscan.only_scanner_count':    only_scanner_count
     }
 
 
-#@@@@@@ thrdscan  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+#TODO requires cross-plugin comparison with Threads.json
+def extract_threads_features(jsondump):
+    df = pd.read_json(jsondump)
+    keys = [
+        'threads.nThreads',
+        'threads.null_startpath_ratio',     'threads.kernel_startaddr_ratio',
+        'threads.per_process_max_threads','threads.hidden_from_thrdscan_count'
+    ]
 
+    if df.empty:
+        return {k: None for k in keys}
 
+    total = len(df)
+    null_startpath_ratio     = df['StartPath'].isna().mean()
+    kernel_startaddr_ratio   = df['StartAddress'].ge(0xFFFF00000000).mean()
+    per_process_max_threads  = df.groupby('PID').size().max()
+    
+    # requires cross‐comparison with ThrdScan.json
+    hidden_from_thrdscan_cnt = None
 
-#@@@@@@ threads  @@@@@@@@@@@@@@@@@@@@@@@@
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-
-
-
-
+    return {
+        'threads.nThreads'                 : total,
+        'threads.null_startpath_ratio'     : float(null_startpath_ratio),
+        'threads.kernel_startaddr_ratio'   : float(kernel_startaddr_ratio),
+        'threads.per_process_max_threads'  : int(per_process_max_threads),
+        'threads.hidden_from_thrdscan_count': hidden_from_thrdscan_cnt
+    }
 
 
 def extract_unhooked_system_calls_features(jsondump):
@@ -1361,53 +1789,160 @@ def extract_unloadedmodules_features(jsondump, known_drivers: set[str] = None):
     }
 
 
-
-
-
 def extract_vadinfo_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'vadinfo.nEntries': len(df),
-        'vadinfo.nFile': df.File.nunique(),
-        'vadinfo.nPID': df.PID.nunique(),
-        'vadinfo.nParent': df.Parent.nunique(),
-        'vadinfo.nProcess': df.Process.nunique(),
-        'vadinfo.Process_Malware': len(df[df["Process"]=="malware.exe"]),   ##### Tells if malware ran or not
-        'vadinfo.Type_Vad': len(df[df["Tag"]=="Vad "]),
-        'vadinfo.Type_VadS': len(df[df["Tag"]=="VadS"]),
-        'vadinfo.Type_VadF': len(df[df["Tag"]=="VadF"]),
-        'vadinfo.Type_VadI': len(df[df["Tag"]=="VadI"]),
-        'vadinfo.Protection_RO': len(df[df["Protection"]=="PAGE_READONLY"]),
-        'vadinfo.Protection_RW': len(df[df["Protection"]=="PAGE_READWRITE"]),
-        'vadinfo.Protection_NA': len(df[df["Protection"]=="PAGE_NOACCESS"]),
-        'vadinfo.Protection_EWC': len(df[df["Protection"]=="PAGE_EXECUTE_WRITECOPY"]),
-        'vadinfo.Protection_WC': len(df[df["Protection"]=="PAGE_WRITECOPY"]),
-        'vadinfo.Protection_ERW': len(df[df["Protection"]=="PAGE_EXECUTE_READWRITE"]),
-        'vadinfo.Avg_Children': df['__children'].apply(len).mean()
+    df = pd.read_json(jsondump)
+    keys = [
+        'vadinfo.nEntries',        'vadinfo.nFile',             'vadinfo.nPID',
+        'vadinfo.nParent',         'vadinfo.nProcess',          'vadinfo.Process_Malware',
+        'vadinfo.Type_Vad',        'vadinfo.Type_VadS',         'vadinfo.Type_VadF',
+        'vadinfo.Type_VadI',       'vadinfo.Protection_RO',      'vadinfo.Protection_RW',
+        'vadinfo.Protection_NA',   'vadinfo.Protection_EWC',     'vadinfo.Protection_WC',
+        'vadinfo.Protection_ERW',  'vadinfo.Avg_Children',      # V2 features
+        'vadinfo.exec_ratio',      'vadinfo.large_commit_count', 'vadinfo.avg_region_size_kb',
+        'vadinfo.file_backed_ratio','vadinfo.susp_ext_count'      # New features
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    features = {
+        'vadinfo.nEntries': total,
+        'vadinfo.nFile': int(df['File'].nunique()),
+        'vadinfo.nPID': int(df['PID'].nunique()),
+        'vadinfo.nParent': int(df['Parent'].nunique()),
+        'vadinfo.nProcess': int(df['Process'].nunique()),
+        'vadinfo.Process_Malware': int((df['Process'] == 'malware.exe').sum()),
+        'vadinfo.Type_Vad': int((df['Tag'] == 'Vad ').sum()),
+        'vadinfo.Type_VadS': int((df['Tag'] == 'VadS').sum()),
+        'vadinfo.Type_VadF': int((df['Tag'] == 'VadF').sum()),
+        'vadinfo.Type_VadI': int((df['Tag'] == 'VadI').sum()),
+        'vadinfo.Protection_RO': int((df['Protection'] == 'PAGE_READONLY').sum()),
+        'vadinfo.Protection_RW': int((df['Protection'] == 'PAGE_READWRITE').sum()),
+        'vadinfo.Protection_NA': int((df['Protection'] == 'PAGE_NOACCESS').sum()),
+        'vadinfo.Protection_EWC': int((df['Protection'] == 'PAGE_EXECUTE_WRITECOPY').sum()),
+        'vadinfo.Protection_WC': int((df['Protection'] == 'PAGE_WRITECOPY').sum()),
+        'vadinfo.Protection_ERW': int((df['Protection'] == 'PAGE_EXECUTE_READWRITE').sum()),
+        'vadinfo.Avg_Children': float(df['__children'].apply(len).mean())
     }
+
+    sus_entries_mask = df['File'].dropna().str.lower().apply(
+                lambda f: f.endswith(('.tmp', '.dat', '.bin')) or (f and '.' not in f.split('/')[-1]))
+    
+    # new metrics inlined
+    features.update({
+        'vadinfo.exec_ratio': round(df['Protection'].str.contains('EXECUTE', na=False).sum() / total, 4),
+        'vadinfo.large_commit_count': int((df['CommitCharge'] >= 100).sum()),
+        'vadinfo.avg_region_size_kb': float(((df['End VPN'] - df['Start VPN'] + 1) * 4).mean()),
+        'vadinfo.file_backed_ratio': round(df['File'].notna().sum() / total, 4),
+        'vadinfo.susp_ext_count': int(sus_entries_mask.sum())
+    })
+
+    return features
+
 
 def extract_vadwalk_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'vadwalk.Avg_Size': (df['End'] - df['Start']).mean(),
+    df = pd.read_json(jsondump)
+    keys = [
+        'vadwalk.Avg_Size',      'vadwalk.total_vads',       'vadwalk.max_vad_size',
+        'vadwalk.std_vad_size',  'vadwalk.tag_entropy',      'vadwalk.avg_gap_kb'     # V2 & new features
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    # preparatory variables for reuse
+    sizes      = df['End'] - df['Start']
+    sd        = df.sort_values(['Start', 'End'])
+    next_start = sd['Start'].shift(-1)
+    gaps       = (next_start - sd['End']).clip(lower=0).dropna()
+
+    features = {
+        'vadwalk.Avg_Size': float(sizes.mean())
     }
+
+    features.update({
+        'vadwalk.total_vads': int(len(df)),
+        'vadwalk.max_vad_size': float(sizes.max()),
+        'vadwalk.std_vad_size': float(sizes.std()),
+        'vadwalk.tag_entropy': float(shannon_entropy(df['Tag'])),
+        'vadwalk.avg_gap_kb': float((gaps.dropna().mean() / 1024))
+    })
+
+    return features
+
+
 
 def extract_verinfo_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'verinfo.nEntries': len(df),
-        'verinfo.nUniqueProg': df.Name.nunique(),
-        'verinfo.nPID': df.PID.nunique(),
-        'verinfo.Avg_Children': df['__children'].apply(len).mean()
+    df = pd.read_json(jsondump)
+    keys = [
+        'verinfo.nEntries',     'verinfo.nUniqueProg',  'verinfo.nPID',
+        'verinfo.Avg_Children', 'verinfo.valid_version_ratio', 'verinfo.null_name_ratio',
+        'verinfo.orphan_entry_count', 'verinfo.avg_major_version', 'verinfo.dup_base_count'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    features = {
+        'verinfo.nEntries'     : total,
+        'verinfo.nUniqueProg'  : df['Name'].nunique(),
+        'verinfo.nPID'         : df['PID'].nunique(),
+        'verinfo.Avg_Children' : float(df['__children'].apply(len).mean())
     }
 
+    # new metrics inlined
+    features.update({
+        'verinfo.valid_version_ratio'  : float(((df['Major'].notna() & df['Minor'].notna()).sum() / total)),
+        'verinfo.null_name_ratio'      : float((df['Name'].isna().sum() / total)),
+        'verinfo.orphan_entry_count'   : int(df['PID'].isna().sum()),
+        'verinfo.avg_major_version'    : float(df['Major'].dropna().mean()) if df['Major'].notna().any() else None,
+        'verinfo.dup_base_count'       : total - df['Base'].nunique()
+    })
+
+    return features
+
 def extract_virtmap_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'virtmap.nEntries': len(df),
-        'virtmap.Avg_Offset_Size': (df['Start offset'] - df['End offset']).mean(),
-        'virtmap.Avg_Children': df['__children'].apply(len).mean() #254
+    df = pd.read_json(jsondump)
+    keys = [
+        'virtmap.nEntries',           'virtmap.Avg_Offset_Size',    'virtmap.Avg_Children',
+        'virtmap.unused_size_ratio',  'virtmap.zero_len_region_count', 'virtmap.nonstandard_region_count',
+        'virtmap.max_region_size_mb', 'virtmap.pagedpool_fragmentation'
+    ]
+
+    if df.empty:
+        return {k: None for k in keys}
+
+    total = len(df)
+    region_sizes = df['Start offset'] - df['End offset']
+    total_mapped = region_sizes.sum()
+    canonical = [
+        'MiVaBootLoaded', 'MiVaDriverImages', 'MiVaFormerlySessionGlobalSpace',
+        'MiVaHal', 'MiVaKernelStacks', 'MiVaNonPagedPool', 'MiVaPagedPool',
+        'MiVaPfnDatabase', 'MiVaProcessSpace', 'MiVaSessionSpace',
+        'MiVaSpecialPoolPaged', 'MiVaSystemCache', 'MiVaSystemPtes',
+        'MiVaSystemPtesLarge', 'MiVaUnused'
+    ]
+
+    # V2 features
+    features = {
+        'virtmap.nEntries'       : total,
+        'virtmap.Avg_Offset_Size': float(region_sizes.mean()),
+        'virtmap.Avg_Children'   : float(df['__children'].apply(len).mean())
     }
+
+    paged_pool_mask = region_sizes[df['Region']=='MiVaPagedPool']
+
+    # New metrics, inlined where possible
+    features.update({
+        'virtmap.unused_size_ratio'     : float(region_sizes[df['Region']=='MiVaUnused'].sum() / total_mapped),
+        'virtmap.zero_len_region_count' : int((df['End offset'] == 0).sum()),
+        'virtmap.nonstandard_region_count': int((~df['Region'].isin(canonical)).sum()),
+        'virtmap.max_region_size_mb'    : float(region_sizes.max() / (1024 * 1024)),
+        'virtmap.pagedpool_fragmentation': float(paged_pool_mask.std() / paged_pool_mask.mean()),
+    })
+
 
 def extract_windowstations_features(jsondump):
     """
@@ -1473,96 +2008,14 @@ def extract_windows_features(jsondump):
 
 
 
+####################################################################################
+####################################################################################
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+####################################################################################
 ####################################################################################
 
 
-
-
-
-
-######################################
-
-
-#TODO Unknown features
-def extract_mbrscan_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'mbrscan.nMBRentries': df.Bootable.size,                                                #Number of MBR entries
-        'mbrscan.nDiskSig': df["Disk Signature"].unique().size,                                 #Number of Disk Signatures
-        'mbrscan.nPartType': df.PartitionType.unique().size,                                    #Number of partition type
-        'mbrscan.bootable': df.Bootable.size - df.Bootable.isna().size                          #Numner of bootable 
-    }
-
-
-#TODO   memory dumping in the folder
+#TODO Empty json output
 def extract_memmap_features(jsondump):
     df=pd.read_json(jsondump)
     try:
@@ -1580,27 +2033,7 @@ def extract_memmap_features(jsondump):
         'memmap.AvgChildren': c     
     }
 
-#TODO Unknown features
-def extract_mftscan_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'mftscan.nEntriesMFT': len(df), #101
-        'mftscan.nAttributeType': df['Attribute Type'].nunique(),
-        'mftscan.nRecordType': df['Record Type'].nunique(),
-        'mftscan.AvgRecordNum': df['Record Number'].mean(),
-        'mftscan.AvgLinkCount': df['Link Count'].mean(),
-        'mftscan.0x9_typeMFT': len(df[df['MFT Type'] == '0x9']),
-        'mftscan.0xd_typeMFT': len(df[df['MFT Type'] == '0xd']),
-        'mftscan.DirInUse_typeMFT': len(df[df['MFT Type'] == 'DirInUse']),
-        'mftscan.Removed_typeMFT': len(df[df['MFT Type'] == 'Removed']),
-        'mftscan.File_typeMFT': len(df[df['MFT Type'] == 'File']),
-        'mftscan.Other_typeMFT': len(df[~df['MFT Type'].isin(['0x9','0xd','DirInUse','Removed','File'])]),
-        'mftscan.AvgChildren': df['__children'].apply(len).mean()
-    }
-
-
-
-#TODO Unknown features
+#TODO Empty file
 def extract_netstat_features(jsondump):
     df=pd.read_json(jsondump)
     return{
@@ -1623,53 +2056,61 @@ def extract_netstat_features(jsondump):
         'netstat.nNaNPID': df['PID'].isna().sum() 
     }
 
-#TODO Unknown features
-def extract_registry_printkey_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'registry.printkey.nKeys': len(df),
-        'registry.printkey.nDistinct': df.Name.nunique(),
-        'registry.printkey.nType_key': len(df[df["Type"]=="Key"]),
-        'registry.printkey.nType_other': len(df) - len(df[df["Type"]=="Key"]),
-        'registry.printkey.Volatile_0': len(df[df["Volatile"]==0]),
-        'registry.printkey.Avg_Children': df['__children'].apply(len).mean() 
-    }
+#TODO exactly the same output as scheduled tasks
+def extract_registry_scheduled_tasks_features():
+  return{}
+
+# Not in the current volatility plugins
+# def extract_mftscan_features(jsondump):
+#     df=pd.read_json(jsondump)
+#     return{
+#         'mftscan.nEntriesMFT': len(df), #101
+#         'mftscan.nAttributeType': df['Attribute Type'].nunique(),
+#         'mftscan.nRecordType': df['Record Type'].nunique(),
+#         'mftscan.AvgRecordNum': df['Record Number'].mean(),
+#         'mftscan.AvgLinkCount': df['Link Count'].mean(),
+#         'mftscan.0x9_typeMFT': len(df[df['MFT Type'] == '0x9']),
+#         'mftscan.0xd_typeMFT': len(df[df['MFT Type'] == '0xd']),
+#         'mftscan.DirInUse_typeMFT': len(df[df['MFT Type'] == 'DirInUse']),
+#         'mftscan.Removed_typeMFT': len(df[df['MFT Type'] == 'Removed']),
+#         'mftscan.File_typeMFT': len(df[df['MFT Type'] == 'File']),
+#         'mftscan.Other_typeMFT': len(df[~df['MFT Type'].isin(['0x9','0xd','DirInUse','Removed','File'])]),
+#         'mftscan.AvgChildren': df['__children'].apply(len).mean()
+    # }
+
+#TODO   Empty json output for the plugin
+def extract_hollow_processes_features():
+  return{}
+
+#TODO   Empty json output for the plugin
+def extract_etwpatch_features():
+  return{}
+
+#TODO   Empty json output for the plugin
+def extract_crashinfo_features():
+  return{}
 
 
-#TODO Unknown features
-def extract_registry_userassist_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'registry.userassist.n': len(df),
-        'registry.userassist.nUnique': df["Hive Name"].nunique(),
-        'registry.userassist.Avg_Children': df['__children'].apply(len).mean(),
-        'registry.userassist.path_DNE': len(df[df["Path"]=="None"]),
-        'registry.userassist.type_key': len(df[df["Type"]=="Key"]),
-        'registry.userassist.type_other': len(df) - len(df[df["Type"]=="Key"])
-    }
+#TODO   Empty json output for the plugin
+def extract_orphan_kernel_threads_features():
+  return{}
 
+#TODO   Empty json output for the plugin
+def extract_processghosting_features():
+  return{}
 
-#TODO Unknown features
-def extract_sessions_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'sessions.nSessions': len(df),
-        'sessions.nProcess': df.Process.nunique(),
-        'sessions.nUsers': df["User Name"].nunique(),
-        'sessions.nType': df["Session Type"].nunique(),
-        'sessions.Children_exist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).sum()
-    }
+#TODO   Empty json output for the plugin
+def extract_registry_getcellroutine_features():
+  return{}
 
-#TODO Unknown features
-def extract_skeleton_key_features(jsondump):
-    df=pd.read_json(jsondump)
-    return{
-        'skeleton_key.nKey': len(df),
-        'skeleton_key.nProcess': df.Process.nunique(),
-        'skeleton_key.Found_True': len(df[df["Skeleton Key Found"]=="True"]),
-        'skeleton_key.Found_False': len(df[df["Skeleton Key Found"]=="False"])
-    }
+#TODO   Empty json output for the plugin
+def extract_suspended_threads_features():
+  return{}
 
+#TODO   Empty json output for the plugin
+def extract_svcdiff_features():
+  return{}
 
-
-
+#TODO   Empty json output for the plugin
+def extract_suspicious_threads_features():
+  return{}

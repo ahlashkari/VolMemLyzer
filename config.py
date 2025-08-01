@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 PID_LIST = []
 IOC_KEYWORDS = ["curl", "http", "invoke-webrequest", "mimikatz"]
-DUMP_TIME = datetime.now(timezone.utc).isoformat(sep=' ', timespec='seconds')
+DUMP_TIME = datetime.now(timezone.utc)
 
 BASE_VOL_MODULES = {
     # 'info': extractors.extract_winInfo_features,
@@ -16,10 +16,10 @@ VOL_MODULES = {
     # 'pslist': extractors.extract_pslist_features,
     # 'ssdt' : extractors.extract_ssdt_features,
     # 'bigpools' : extractors.extract_bigpools_features,
-    # 'cmdscan' : extractors.extract_cmdscan_features, 
-    # 'joblinks': extractors.extract_joblinks_features,
-    # 'consoles' : extractors.extract_consoles_features,
-    'deskscan': extractors.extract_deskscan_features,
+    'cmdscan' : extractors.extract_cmdscan_features, 
+    'joblinks': extractors.extract_joblinks_features,
+    'consoles' : extractors.extract_consoles_features,
+    # 'deskscan': extractors.extract_deskscan_features,
     # 'getservicesids': extractors.extract_getservicesids_features,
     # 'iat': extractors.extract_iat_features,
     # 'modules': extractors.extract_modules_features,
