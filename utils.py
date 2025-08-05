@@ -5,12 +5,10 @@ import math
 import pandas as pd
 from collections.abc import Iterable
 from collections import Counter
+
 # from extractors import extract_winInfo_features
 
 # DUMP_TIME = extract_winInfo_features(json)
-
-
-
 
 def invoke_volatility3(vol_py_path, memdump_path, module, output_to):
     with open(output_to,'w') as f:
@@ -32,7 +30,6 @@ def char_entropy(s: str) -> float:
     cnt, n = Counter(s), len(s)
     return -sum((c / n) * math.log2(c / n) for c in cnt.values())
 
-# --------------------------------------------------------------------------- #
 def flatten_records(rows):
     """Yield every dict in the tree (top + nested __children)."""
     for r in rows:
@@ -64,32 +61,20 @@ def shannon_entropy(obj):
 
 def not_system_path(p):
     p = (p or "").lower()
-    if 'administrator' in p or "c:\\windows" in p or p.startswith("%systemroot%") or p.startswith("\\systemroot"):
+    if p.startswith(("c:\\windows", "%systemroot%", "\\systemroot")):
         return False
     return True
     
-# def get_depth(series):
-    # print((node))
-    # depths = []
-    # for child in series:
-    #     print(child)
-
-    #     if child != []:
-    #         print(child) 
-    #         depths.append(1 + get_depth(child))
-     
-    # return max(depths)   # print(get_depth(child))
-
-    # print(series)
+def get_depth(children):
+    for child in children:
+        depth = 1
+        if len(child['__children']) != 0:
+            child_depth = get_depth(child['__children'])
+            return child_depth + depth
+        else:
+            return depth
+    return 0
         
-
-
-
-    # if isinstance(node, list) and node:
-    #     print('here')
-    #     return 1 + max(get_depth(child) for child in node)
-    # return 1  # If it's a leaf node (empty list or no children)
-
 def write_dict_to_csv(filename, dictionary,memdump_path):
     fieldnames = list(dictionary.keys())
     

@@ -12,18 +12,14 @@ from statistics import mean
 #### fix ioc keyword input
 #### fix time baseline for the dump
 
-
 # Added empty handling 
 def extract_amcache_features(jsondump, dump_ts):    
+    
     df = pd.read_json(jsondump)
-    keys = ["amcache.nEntries",            
-        "amcache.nUniqueSHA1",         
-        "amcache.CompileAfterDump",    
-        "amcache.InstallAfterDump",    
-        "amcache.LastModifyAfterDump",
-        "amcache.nonMicrosoftRatio", 
-        "amcache.outsideSystem32",  
-        "amcache.fileAgeDays_mean"]
+    keys = ["amcache.nEntries", "amcache.nUniqueSHA1",  
+        "amcache.CompileAfterDump", "amcache.InstallAfterDump",    
+        "amcache.LastModifyAfterDump",  "amcache.nonMicrosoftRatio", 
+        "amcache.outsideSystem32",  "amcache.fileAgeDays_mean"]
 
     if df.empty:
         return {k: None for k in keys}
@@ -42,7 +38,6 @@ def extract_amcache_features(jsondump, dump_ts):
         "amcache.outsideSystem32"     : int(df["Path"].fillna("").str.lower().apply(not_system_path).sum()),
         "amcache.fileAgeDays_mean"    : float((dump_ts - modify_ts).dt.total_seconds().div(86400).mean()),
     }
-
 
 
 def extract_bigpools_features(jsondump):
@@ -68,7 +63,7 @@ def extract_bigpools_features(jsondump):
         'bigpools.avgBytes'      : float(df['NumberOfBytes'].mean()),
         'bigpools.largeAllocs'   : int((df['NumberOfBytes'] > (1 << 20)).sum()),
         'bigpools.nonPagedRatio' : float(df['PoolType'].str.contains('nonpaged', case=False, na=False).mean()),
-        'bigpools.tagEntropyMean': float(tag_entropy_mean, 4),
+        'bigpools.tagEntropyMean': float(tag_entropy_mean),
         'bigpools.tagRare'       : int(tag_rare),
     }
 
@@ -107,14 +102,9 @@ def extract_callbacks_features(jsondump):
 
     return features
 
-
-
 def extract_cmdline_features(jsondump):
     df = pd.read_json(jsondump)
-    # Existing v2 features
-    df = pd.read_json(jsondump)
-    
-    # Existing v2 features
+
     features = {
         'cmdline.nLine': df.PID.size,                                                           # Number of cmd operations
         'cmdline.not_in_C': df.PID.size - df['Args'].str.startswith("C:").sum(),                # Number of cmd initiating from C drive
@@ -131,6 +121,8 @@ def extract_cmdline_features(jsondump):
         'cmdline.avgArgLen': df['Args'].str.len().mean() if df['Args'].notna().sum() > 0 else None,  # Average argument length
         'cmdline.distinctProcesses': df['Process'].nunique(),                                  # Unique process names
     })
+    
+    return features
 
 
 def extract_cmdscan_features(jsondump):
@@ -141,7 +133,7 @@ def extract_cmdscan_features(jsondump):
         cmdscan.appMismatch       : # blocks where Application ≠ parent Process
         cmdscan.cmdCountRatio     : mean(CommandCount / CommandCountMax)
     """
-    df = pd.read_json(jsondump)          # jsondump is an open()-handle
+    df = pd.read_json(jsondump)       
     if df.empty:
         return {k: None for k in (
         'cmdscan.nHistories', 'cmdscan.nonZeroHist',
@@ -154,19 +146,14 @@ def extract_cmdscan_features(jsondump):
     cmd_counts = []
     mismatch = 0
         
-    # print(cmd_df)
     for _, row in cmd_df.iterrows():
-        # print(row)
         pid = row['PID']
-        children_arr =  row['__children'] #['Property']
+        children_arr =  row['__children'] 
         
         for child in children_arr:
-            if child['Property'].endswith(".CommandCount"): # and child['Data'] != '0':
-                # nNonZero +=1
-                # cmd_counts.append(int(child['Data']))
+            if child['Property'].endswith(".CommandCount"): 
                 cmd_count = int(child['Data'])
-            
-            # print(child['PID'])
+
             if child['Property'].endswith('.Application') and child['PID'] != pid:
                 mismatch +=1
     
@@ -311,11 +298,9 @@ def extract_deskscan_features(jsondump, pids):
     }
 
 
-## TODO get depth
 def extract_devicetree_features(jsondump):
-
     df = pd.read_json(jsondump)
-    
+
     # Existing v2 features
     features = {
         'devicetree.ndevice': df['Type'].size,  # Number of devices in device tree
@@ -326,7 +311,7 @@ def extract_devicetree_features(jsondump):
     features.update({
         'devicetree.uniqueDrivers': df['DriverName'].nunique(),  # Number of unique drivers
         'devicetree.driverEntropy': shannon_entropy(df['DriverName']) if len(df) > 0 else None,  # Entropy of driver names                                         
-        # 'devicetree.maxDepth': get_depth(df['__children']) if df['__children'].notna().any() else None,  # Max depth of device tree
+        'devicetree.maxDepth': int(df['__children'].apply(get_depth).max()) if df['__children'].notna().any() else None,  # Max depth of device tree
         'devicetree.avgChildrenPerDRV': df[df['Type'] == 'DRV']['__children'].apply(len).mean() if len(df[df['Type'] == 'DRV']) > 0 else None,  # Avg children per DRV
         'devicetree.attToNullDriver': len(df[(df['Type'] == 'ATT') & df['DriverNameOfAttDevice'].isna()]),  # Attachments with null drivers
         'devicetree.nonDrvAttachRatio': len(df[df['Type'] != 'DRV']) / len(df) if len(df) > 0 else None,  # Non-DRV attachment ratio
@@ -431,17 +416,16 @@ def extract_driverscan_features(jsondump):
     return features
 
 
-# def extract_dumpfiles_features(jsondump):     ##### Use if you need the features as creates a lot of garbage in VOLMEMLYZER Folder
-#     df=pd.read_json(jsondump)
-#     return{
-#         'dumpfiles.ndump': df.FileObject.size,                                                  #Number of dump files
-#         'dumpfiles.nCache': df.Cache.unique().size,                                             #Number of Cache
-#         'dumpfiles.nFile': df.FileName.unique().size,                                           #Number of distinct files
-#     }
 
-#TODO fix the dataframe
 def extract_envars_features(jsondump):
-    df=pd.read_json(jsondump)
+    df = pd.read_json(jsondump)
+    keys = ['envars.nVars', 'envars.nProc',  'envars.nBlock', 'envars.n_diff_var', 'envars.nValue', 
+        'envars.tempPathOutsideWinRatio',  'envars.has_PSModulePathUser', 'envars.cmdExeComSpecMismatch',
+        'envars.dupBlockCount', 'envars.pathEntropyMean', 'envars.userTempMismatch' ]
+
+    if df.empty:
+        return {k: None for k in keys}
+    
     features = {
         'envars.nVars': df.Value.size,                                                          #Number of environment variables
         'envars.nProc': df.PID.unique().size,                                                   #Number of Processes using Env vars
@@ -449,6 +433,23 @@ def extract_envars_features(jsondump):
         'envars.n_diff_var': df.Variable.unique().size,                                         #Number of diff variable names
         'envars.nValue': df.Value.unique().size,                                                #Number of distinct value entries
     }
+
+    tempPathOutsideWin = (~df.loc[df['Variable'].isin(['TEMP','TMP']), 'Value'].str.lower().str.startswith('c:\\windows\\'))
+    has_PSModulePath = df.loc[df['Variable'] == 'PSModulePath', 'Value'].str.contains('AppData', case=False)
+    cmdExeComSpecMismatch = (df['Variable'].eq('ComSpec') & ~df['Value'].str.lower().eq('c:\\windows\\system32\\cmd.exe'))
+    pathEntropyMask = df.loc[df['Variable'] == 'Path', 'Value']
+
+    
+    features.update({
+        'envars.tempPathOutsideWinRatio': float(tempPathOutsideWin.sum() / max(1, df['Variable'].isin(['TEMP','TMP']).sum())),
+        'envars.has_PSModulePathUser': int(has_PSModulePath.any()),
+        'envars.cmdExeComSpecMismatch': int(cmdExeComSpecMismatch.sum()),
+        'envars.dupBlockCount': int((df.groupby('Block')['PID'].nunique() > 1).sum()),
+        'envars.pathEntropyMean': float(pathEntropyMask.apply(char_entropy).mean()),
+        # 'envars.userTempMismatch': None
+        #TODO for each PID, the logged-on user name or token needed from pslist!
+    })
+
     return features
 
 def extract_filescan_features(jsondump):
@@ -471,8 +472,6 @@ def extract_filescan_features(jsondump):
 
 def extract_getservicesids_features(jsondump):
     """
-    Extractor for windows.getservicesids JSON output (pd.read_json style).
-    Returns a dict with keys:
       • servicesids.nServices
       • servicesids.sidEntropy
       • servicesids.svcNameEntropyMean
@@ -635,7 +634,7 @@ def extract_winInfo_features(jsondump):
         'info.winBuild': df.loc[df['Variable'] == 'Major/Minor', 'Value'].iat[0],
         'info.npro': df.loc[df['Variable'] == 'KeNumberProcessors', 'Value'].iat[0],
         'info.IsPAE': df.loc[df['Variable'] == 'IsPAE', 'Value'].iat[0],
-        'info.SystemTime': df.loc[df['Variable'] == 'SystemTime', 'Value'].iat[0]
+        'info.SystemTime': pd.to_datetime(df.loc[df['Variable'] == 'SystemTime', 'Value'].iat[0], errors="coerce", utc=True)
     }
 
     features.update({
@@ -675,7 +674,8 @@ def extract_joblinks_features(jsondump):
         joblinks.highActiveSkew     : rows where Active/Total > 0.8
         joblinks.nameEntropyMean    : mean entropy of Name strings
     """
-    data = json.load(jsondump)
+    with open(jsondump, 'r') as f:
+        data = json.load(f)
     
     flat = list(flatten_records(data))
     if not flat:        # keep columns stable on empty output
@@ -782,18 +782,26 @@ def extract_malfind_features(jsondump):
     return features
 
 
-#TODO FIX THE .DLL EXTENTION
 def extract_modscan_features(jsondump):
     df=pd.read_json(jsondump)
+
+    keys = ['modscan.nMod', 'modscan.nUniqueExt', 'modscan.nDLL' , 'modscan.nSYS',
+        'modscan.nEXE', 'modscan.nOthers', 'modscan.AvgSize', 'modscan.MeanChildExist',
+        'modscan.FO_Enabled', 'modscan.offPathCount', 'modscan.sizeStddev', 'modscan.dupBaseCnt',
+        'modscan.nameEntropyMean', 'modscan.unknownExtCount']
+    
+    if df.empty:
+        return {k: None for k in keys}
+
     features = {
         'modscan.nMod': len(df),   #List of Loaded Kernel Modules #113
         'modscan.nUniqueExt': len(df['Name'].str.extract(r'\.(\w+)$')[0].str.lower().unique()) - 1, 
-        # 'modscan.nDLL': len(df[df['Name'].str.endswith('.dll','.DLL')]),
-        # 'modscan.nSYS': len(df[df['Name'].str.endswith('.sys','.SYS')]),
-        # 'modscan.nEXE': len(df[df['Name'].str.endswith('.exe','.EXE')]),
-        # 'modscan.nOthers': len(df) - len(df[df['Name'].str.endswith('.dll','.DLL')]) - len(df[df['Name'].str.endswith('.sys','.SYS')]) - len(df[df['Name'].str.endswith('.exe','.EXE')]),
-        'modscan.AvgSize': df['Size'].mean(),
-        'modscan.MeanChildExist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).mean(), # CHIld exist 1 else 0
+        'modscan.nDLL': int(df['Name'].dropna().str.lower().str.endswith('.dll').sum()),
+        'modscan.nSYS': int(df['Name'].dropna().str.lower().str.endswith('.sys').sum()),
+        'modscan.nEXE': int(df['Name'].dropna().str.lower().str.endswith('.exe').sum()),
+        'modscan.nOthers': int(df['Name'].dropna().str.lower().apply(lambda x: not x.endswith(('.exe','.sys','.dll'))).sum()),  #str.endswith(('.dll','.exe','.sys')).sum()),
+        'modscan.AvgSize': float(df['Size'].mean()),
+        'modscan.MeanChildExist': float(df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).mean()), # CHIld exist 1 else 0
         'modscan.FO_Enabled': len(df[df['File output'] == 'Enabled'])
     }
     
@@ -985,23 +993,14 @@ def extract_pslist_features(jsondump):
 
     nproc          = len(df) 
     pids           = df['PID'].values
-    nppid          = df.PPID.nunique()
-    avg_threads    = df.Threads.mean()
-    avg_handles    = df.Handles.mean()
     nprocs64bit    = len(df[df["Wow64"] == True])
-    outfile        = nproc - len(df[df["File output"] == "Disabled"])
-
-
-    nproc = nppid = avg_threads = avg_handles = nprocs64bit = outfile = None
 
     zombie_count   = len(df[df["ExitTime"].notna()])        # still resident but ExitTime recorded
     wow64_ratio    = nprocs64bit / nproc if nproc else None
 
-    # Handles column can be null – cast safely
     handles_numeric = pd.to_numeric(df["Handles"], errors="coerce")
     restricted_pct  = (handles_numeric.lt(4).sum() / nproc) if nproc else None        
 
-    # User-land path heuristic: basename *not* living under Windows\ or Program Files\
     def is_user_path(name):
         name = str(name).lower()
         return (not name.startswith("c:\\windows\\")
@@ -1011,11 +1010,11 @@ def extract_pslist_features(jsondump):
     return [pids, {
         # V2
         "pslist.nproc"        : nproc,
-        "pslist.nppid"        : nppid,
-        "pslist.avg_threads"  : avg_threads,
-        "pslist.avg_handlers" : avg_handles,
-        "pslist.nprocs64bit"  : nprocs64bit,
-        "pslist.outfile"      : outfile,
+        "pslist.nppid"        : df.PPID.nunique(),
+        "pslist.avg_threads"  : float(df.Threads.dropna().mean()) if not df.Threads.dropna().empty else None,
+        "pslist.avg_handlers" : float(df.Handles.dropna().mean()) if not df.Handles.dropna().empty else None,
+        "pslist.nprocs64bit"  : len(df[df["Wow64"] == True]),
+        "pslist.outfile"      : nproc - len(df[df["File output"] == "Disabled"]),
 
         "pslist.zombie_count"       : zombie_count,
         "pslist.wow64_ratio"        : wow64_ratio,
@@ -1025,7 +1024,9 @@ def extract_pslist_features(jsondump):
 
 
 def extract_pstree_features(jsondump):
-    data = json.load(jsondump)
+    with open(jsondump, 'r') as f:
+        data = json.load(f)
+    
     df = pd.DataFrame(data)
 
     def get_max_depth(node):
@@ -1255,20 +1256,22 @@ def extract_registry_hivelist_features(jsondump):
         'registry.hivelist.offset_gap_stddev' : float(offs.diff().dropna().std()) 
     })
     
-    return features
-
+    return [offs, features]
 
 
 #TODO HIVELIST IS NEEDED cross plugin
-def extract_registry_hivescan_features(jsondump):
+def extract_registry_hivescan_features(jsondump, hivelist_offsets):
     df=pd.read_json(jsondump)
     features = {
         'registry.hivescan.nHives': len(df),
         'registry.hivescan.Children_exist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).sum()  
     }
 
+    offsets = pd.to_numeric(df['Offset'], errors='coerce').dropna().sort_values()
+    orphan_offsets = set(offsets) - set(hivelist_offsets)
+
     features.update({
-        # 'hivescan.orphan_offset_count': int(len(df) - df["Offset"].isin(df["Offset"].dropna().unique()).sum()),
+        'hivescan.orphan_offset_count': int(len(orphan_offsets)),
         'hivescan.too_high_offset_ratio': float((df["Offset"] > 0x7FFFFFFFFFFF).mean()),
         'hivescan.offset_entropy': float(shannon_entropy(df['Offset']))
     })
@@ -1396,7 +1399,6 @@ def extract_skeleton_key_features(jsondump):
     return features
 
 
-#TODO Unknown features
 def extract_statistics_features(jsondump):
     """
     Extracts two NEW metrics from windows.statistics JSON:
@@ -1405,10 +1407,8 @@ def extract_statistics_features(jsondump):
     """
     df=pd.read_json(jsondump)
     keys = ['statistics.Invalid_all', 'statistics.Invalid_large', 'statistics.Invalid_other', 
-            'statistics.Swapped_all', 'statistics.Swapped_large',
-        'statistics.Valid_all', 'statistics.Valid_large',
-            'statistics.invalid_page_ratio',  'statistics.Invalid_large','statistics.swapped_page_count',
-            ]
+            'statistics.Swapped_all', 'statistics.Swapped_large', 'statistics.Valid_all', 'statistics.Valid_large',
+            'statistics.invalid_page_ratio',  'statistics.Invalid_large','statistics.swapped_page_count' ]
     
     if df.empty:
         return {k: None for k in keys}
@@ -1429,7 +1429,7 @@ def extract_statistics_features(jsondump):
 
     features.update({
         'statistics.invalid_page_ratio'       : float(invalid_all / (invalid_all + valid_all)) if (invalid_all + valid_all) != 0 else None,
-        'statistics.swapped_page_count'       : int(stat_row.get('Swapped Pages (all)')),
+        'statistics.swapped_page_count'       : int(stat_row.get('Swapped Pages (all)'))
     })
     
     return features
@@ -1661,38 +1661,12 @@ def extract_symlinkscan_features(jsondump):
 
     return features
 
-
-#TODO requires cross-plugin comparison with Threads.json
-def extract_thrdscan_features(jsondump):
-    df = pd.read_json(jsondump)
-
-    # basic counts and ratios
-    null_startpath_ratio   = df['StartPath'].isna().mean()
-    null_createtime_ratio  = df['CreateTime'].isna().mean()
-    dup_startaddr_ratio    = (df.groupby(['PID','StartAddress'])
-                                .size()
-                                .gt(1)
-                                .sum() / len(df))
-    
-    only_scanner_count     = None  
-
-    return {
-        'thrdscan.nThreads':               len(df),           
-        'thrdscan.null_startpath_ratio':   float(null_startpath_ratio),
-        'thrdscan.null_createtime_ratio':  float(null_createtime_ratio),
-        'thrdscan.duplicate_startaddr_ratio': float(dup_startaddr_ratio),
-        'thrdscan.only_scanner_count':    only_scanner_count
-    }
-
-
-#TODO requires cross-plugin comparison with Threads.json
 def extract_threads_features(jsondump):
     df = pd.read_json(jsondump)
     keys = [
         'threads.nThreads',
         'threads.null_startpath_ratio',     'threads.kernel_startaddr_ratio',
-        'threads.per_process_max_threads','threads.hidden_from_thrdscan_count'
-    ]
+        'threads.per_process_max_threads','threads.hidden_from_thrdscan_count']
 
     if df.empty:
         return {k: None for k in keys}
@@ -1701,17 +1675,36 @@ def extract_threads_features(jsondump):
     null_startpath_ratio     = df['StartPath'].isna().mean()
     kernel_startaddr_ratio   = df['StartAddress'].ge(0xFFFF00000000).mean()
     per_process_max_threads  = df.groupby('PID').size().max()
+    thread_offsets = df['Offset']
     
-    # requires cross‐comparison with ThrdScan.json
-    hidden_from_thrdscan_cnt = None
-
-    return {
+    features = {
         'threads.nThreads'                 : total,
         'threads.null_startpath_ratio'     : float(null_startpath_ratio),
         'threads.kernel_startaddr_ratio'   : float(kernel_startaddr_ratio),
-        'threads.per_process_max_threads'  : int(per_process_max_threads),
-        'threads.hidden_from_thrdscan_count': hidden_from_thrdscan_cnt
+        'threads.per_process_max_threads'  : int(per_process_max_threads)}
+    
+    return [thread_offsets, features]
+
+
+
+#TODO requires cross-plugin comparison with Threads.json
+def extract_thrdscan_features(jsondump, threads_offsets):
+    df = pd.read_json(jsondump)
+
+    # basic counts and ratios
+    null_startpath_ratio   = df['StartPath'].isna().mean()
+    null_createtime_ratio  = df['CreateTime'].isna().mean()
+    dup_startaddr    = (df.groupby(['PID','StartAddress']).size())   
+    orphan_thread_count = set(df['Offset']) - set(threads_offsets) 
+
+    return {
+        'thrdscan.nThreads':               len(df),           
+        'thrdscan.null_startpath_ratio':   float(null_startpath_ratio),
+        'thrdscan.null_createtime_ratio':  float(null_createtime_ratio),
+        'thrdscan.duplicate_startaddr_ratio': float(dup_startaddr.gt(1).sum() / len(df)),
+        'thrdscan.orphan_thread_count':  int(len(orphan_thread_count))
     }
+
 
 
 def extract_unhooked_system_calls_features(jsondump):
@@ -1943,6 +1936,7 @@ def extract_virtmap_features(jsondump):
         'virtmap.pagedpool_fragmentation': float(paged_pool_mask.std() / paged_pool_mask.mean()),
     })
 
+    return features
 
 def extract_windowstations_features(jsondump):
     """
@@ -2060,6 +2054,15 @@ def extract_netstat_features(jsondump):
 def extract_registry_scheduled_tasks_features():
   return{}
 
+#TODO creates a lot of garbage in VOLMEMLYZER Folder
+def extract_dumpfiles_features(jsondump):     
+    df=pd.read_json(jsondump)
+    return{
+        'dumpfiles.ndump': df.FileObject.size,                                                  #Number of dump files
+        'dumpfiles.nCache': df.Cache.unique().size,                                             #Number of Cache
+        'dumpfiles.nFile': df.FileName.unique().size,                                           #Number of distinct files
+    }
+
 # Not in the current volatility plugins
 # def extract_mftscan_features(jsondump):
 #     df=pd.read_json(jsondump)
@@ -2089,7 +2092,6 @@ def extract_etwpatch_features():
 #TODO   Empty json output for the plugin
 def extract_crashinfo_features():
   return{}
-
 
 #TODO   Empty json output for the plugin
 def extract_orphan_kernel_threads_features():

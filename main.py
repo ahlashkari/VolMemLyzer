@@ -2,63 +2,134 @@ import tempfile
 import functools
 import argparse
 from config import *
+import networkx as nx
 from utils import *
 
+plugin_folder_path = "D:\Vol_Results\AllPluginsJSON"
+
+def dropStr_to_dropList(drop_list_str):
+    if not drop_list_str or not drop_list_str.strip():
+        raise ValueError("No module name provided for elimination.")
+    
+    raw_items = drop_list_str.split(",")
+    dropped_modules = {item.strip().lower() for item in raw_items if item.strip()}
+
+    # Check for unknown modules (not in VOL_MODULES)
+    invalid_modules = dropped_modules - VOL_MODULES.keys()
+    if invalid_modules:
+        raise ValueError(
+            f"The following modules are not recognized Volatility modules: {sorted(invalid_modules)}.\n"
+            f"Valid Volatility modules are: {sorted(VOL_MODULES.keys())}")
+
+    # Check if any dropped modules are actually required
+    protected_modules = dropped_modules.intersection(BASE_VOL_MODULES)
+    if protected_modules:
+        raise ValueError(
+            f"The following modules are required and cannot be dropped: {sorted(protected_modules)}.\n"
+            f"Required modules are: {sorted(BASE_VOL_MODULES)}")
+    return dropped_modules
+
+
+
+def build_plugin_dag(vol_modules, plugin_deps):
+    G = nx.DiGraph()
+
+    for plugin in vol_modules:
+        G.add_node(plugin)
+    for plugin, deps in plugin_deps.items():
+        for dep in deps:
+            G.add_edge(dep, plugin)
+
+    return list(nx.topological_sort(G))
 
 
 def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_path, drop_list):
     features = {}
+    context = {}
     print('=> Outputting to', CSVoutput_path)
 
-    dropped_modules = set()
-    if drop_list:
-        dropped_modules = set(map(str.strip, drop_list.split(',')))
-        dropped_modules = [str(module).lower() for module in dropped_modules]        
+    dropped_modules = dropStr_to_dropList(drop_list)
 
     with tempfile.TemporaryDirectory() as workdir:
         vol = functools.partial(invoke_volatility3, volatility_path, memdump_path)
-        
-        for module, extractor in BASE_VOL_MODULES.items(): 
-            print('=> Executing Volatility module', repr(module))
-            output_file_path = os.path.join(workdir, module)
-            vol(module, output_file_path)
-            with open(output_file_path, 'r') as output:
-                module_features = extractor(output)
-                
-                if module == 'info':
-                    DUMP_TIME = module_features.get('info.SystemTime') or None
-                    features.update(module_features)
-                
-                if module == 'pslist':
-                    PID_LIST = module_features[0]
-                    features.update(module_features[1])
-                    # del module_features
-
-       
+               
         for module, extractor in VOL_MODULES.items():
             if module.lower() in dropped_modules:
                 print(f'=> Skipping module: {module}')
                 continue
             print('=> Executing Volatility module', repr(module))
-            output_file_path = os.path.join(workdir, module)
-            vol(module, output_file_path)
-            with open(output_file_path, 'r') as output:
-                
-                if module == 'cmdscan':
-                    print(PID_LIST)
-                    module_features = extractor(output, PID_LIST)
-                    features.update(module_features)
-                    # del module_features
-                
-                # module_features = extractor(output)
-                # features.update(module_features)
+            # output_file_path = os.path.join(workdir, module)
+            # vol(module, output_file_path)
 
+            module_pre_output_name = module.replace('.','_')
+            file_list = [filename for filename in os.listdir(plugin_folder_path) if (f'windows_{module_pre_output_name}') in filename]
+           
+            if len(file_list) != 0:
+                # output = output_file_path[0]
+                output = os.path.join(plugin_folder_path, [filename for filename in os.listdir(plugin_folder_path) if (f'windows_{module_pre_output_name}') in filename][0])
+            else: 
+                continue  
+
+
+            # deps = PLUGIN_DEPENDENCIES.get(module, [])
+            # kwargs = {dep: context[dep] for dep in deps if dep in context}
+
+            # result = extractor(output, **kwargs)
+            # print(result, type(result))
+            # if isinstance(result, list) and isinstance(result[1], dict):
+            #     data, feat = result
+            #     features.update(feat)
+            #     context[module] = data
+            # elif isinstance(result, dict):
+            #     features.update(result)
+            # else:
+            #     raise ValueError(f"Extractor for {module} returned unexpected format")
+
+
+            if module == 'info':
+                module_features = extractor(output)
+                DUMP_TIME = module_features.get('info.SystemTime') or None
+                features.update(module_features)
             
-    
+            elif module == 'pslist':
+                module_features = extractor(output)
+                PID_LIST = module_features[0]
+                features.update(module_features[1])
+
+            elif module == 'registry.hivelist':
+                module_features = extractor(output)
+                HIV_OFFSETS = module_features[0]
+                features.update(module_features[1])
+                
+            elif module == 'registry.hivescan':
+                module_features = extractor(output, HIV_OFFSETS)
+                features.update(module_features)
+
+            elif module == 'threads':
+                module_features = extractor(output)
+                THR_OFFSETS = module_features[0]
+                features.update(module_features[1])
+
+            elif module == 'thrdscan':
+                module_features = extractor(output, THR_OFFSETS)    
+                features.update(module_features)
+
+            elif module == 'deskscan':
+                module_features = extractor(output, PID_LIST)
+                features.update(module_features)
+
+            elif module == 'amcache':
+                module_features = extractor(output, DUMP_TIME)
+                features.update(module_features)
+        
+            else:
+                module_features = extractor(output)
+                features.update(module_features)
+
     features_mem = {'mem.name_extn': str(memdump_path).rsplit('/', 1)[-1]}
     features_mem.update(features)
 
-    file_path = os.path.join(CSVoutput_path, 'output1.csv')
+    file_path = os.path.join(CSVoutput_path, 'output.csv')
     write_dict_to_csv(file_path,features_mem,memdump_path)
 
     print('=> All done')
@@ -88,3 +159,5 @@ if __name__ == '__main__':
 
         if (file_path).endswith('.raw') or (file_path).endswith('.mem') or (file_path).endswith('.vmem') or (file_path).endswith('.mddramimage'):
             extract_all_features_from_memdump((file_path), args.output, args.volatility, args.drop)
+
+        break
