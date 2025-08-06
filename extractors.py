@@ -13,7 +13,7 @@ from statistics import mean
 #### fix time baseline for the dump
 
 # Added empty handling 
-def extract_amcache_features(jsondump, dump_ts):    
+def extract_amcache_features(jsondump, **kwargs):    
     
     df = pd.read_json(jsondump)
     keys = ["amcache.nEntries", "amcache.nUniqueSHA1",  
@@ -27,16 +27,26 @@ def extract_amcache_features(jsondump, dump_ts):
     compile_ts = pd.to_datetime(df["CompileTime"].dropna(),    errors="coerce", utc=True)
     install_ts = pd.to_datetime(df["InstallTime"].dropna(),    errors="coerce", utc=True)
     modify_ts  = pd.to_datetime(df["LastModifyTime"].dropna(), errors="coerce", utc=True)
+    dump_ts = kwargs.get('amcache', None)
+
+    if dump_ts:
+        CompileAfterDump = float(compile_ts.gt(dump_ts).sum() / len(compile_ts)) if len(compile_ts) else None
+        InstallAfterDump = float(install_ts.gt(dump_ts).sum() / len(install_ts)) if len(install_ts) else None
+        LastModifyAfterDump = float(modify_ts.gt(dump_ts).sum() / len(modify_ts)) if len(modify_ts) else None
+        FileAgeDays_mean = float((dump_ts - modify_ts).dt.total_seconds().div(86400).mean()) if len(modify_ts) else None
+    else:
+        CompileAfterDump = InstallAfterDump = LastModifyAfterDump = FileAgeDays_mean = None
+
 
     return {
         "amcache.nEntries"            : len(df),
         "amcache.nUniqueSHA1"         : df["SHA1"].nunique(),
-        "amcache.CompileAfterDump"    : float(compile_ts.gt(dump_ts).sum() / len(compile_ts)) if len(compile_ts) else None,
-        "amcache.InstallAfterDump"    : float(install_ts.gt(dump_ts).sum() / len(install_ts)) if len(install_ts) else None,
-        "amcache.LastModifyAfterDump" : float(modify_ts.gt(dump_ts).sum() / len(modify_ts)) if len(modify_ts) else None,
+        "amcache.CompileAfterDump"    : CompileAfterDump,
+        "amcache.InstallAfterDump"    : InstallAfterDump,
+        "amcache.LastModifyAfterDump" : LastModifyAfterDump,
         "amcache.nonMicrosoftRatio"   : float((df["Company"].fillna("").str.lower() != "microsoft corporation").mean()),
         "amcache.outsideSystem32"     : int(df["Path"].fillna("").str.lower().apply(not_system_path).sum()),
-        "amcache.fileAgeDays_mean"    : float((dump_ts - modify_ts).dt.total_seconds().div(86400).mean()),
+        "amcache.fileAgeDays_mean"    : FileAgeDays_mean,
     }
 
 
@@ -180,10 +190,9 @@ def extract_consoles_features(jsondump):
     Expects `jsondump` to be a file‐like handle (open(…, 'r')) whose
     contents are the raw JSON array emitted by `windows.consoles -r json`.
     """
-    try:
-        consoles = json.load(jsondump)
-    except Exception:
-        # keep your CSV schema if the plugin failed
+    df = pd.read_json(jsondump)
+   
+    if df.empty:
         return {k: None for k in [
             'consoles.nConhost',
             'consoles.avgProcPerConsole',
@@ -192,76 +201,46 @@ def extract_consoles_features(jsondump):
             'consoles.histBufOverflow',
             'consoles.titleSuspicious',
             'consoles.dumpIoC',
-        ]}        
-    
+        ]}
 
-    nConhost = len(consoles)
-    proc_counts = []
-    total_cmds = 0
-    null_cmds  = 0
-    buf_overflow = 0
-    title_susp   = 0
-    dump_ioc     = 0
+    children = pd.json_normalize(df['__children'].explode().dropna())
+    nConhost = len(df)
 
+    proc_counts = children[children['Property'].str.endswith('.ProcessCount')].copy()
+    proc_counts['Data'] = pd.to_numeric(proc_counts['Data'], errors='coerce').fillna(0)
+    avg_proc = proc_counts['Data'].mean()
+    max_proc = proc_counts['Data'].max()
+
+    cmd_counts = children[children['Property'].str.endswith('.CommandCount')]
+    total_cmds = len(cmd_counts)
+    null_cmds = cmd_counts['Data'].isin([None, '', []]).sum()
+    empty_hist_ratio = null_cmds / total_cmds if total_cmds else 0
+
+    hb_df = children[children['Property'].str.endswith('.HistoryBufferCount')][['PID', 'Data']].rename(columns={'Data': 'HBCount'})
+    hbmax_df = children[children['Property'].str.endswith('.HistoryBufferMax')][['PID', 'Data']].rename(columns={'Data': 'HBMax'})
+    hb_merged = pd.merge(hb_df, hbmax_df, on='PID', how='inner')
+    hb_merged = hb_merged.apply(pd.to_numeric, errors='coerce')
+    buf_overflow = (hb_merged['HBCount'] == hb_merged['HBMax']).sum()
+
+    titles = children[children['Property'].str.endswith('.Title')]['Data'].dropna().astype(str)
+    orig_titles = children[children['Property'].str.endswith('.OriginalTitle')]['Data'].dropna().astype(str)
+    title_susp = sum(titles.apply(not_system_path)) + sum(orig_titles.apply(not_system_path))
+
+    dumps = children[children['Property'].str.endswith('.Dump')]['Data'].dropna().astype(str).str.lower()
     IOC_KEYWORDS = ["curl", "http", "invoke-webrequest", "mimikatz"]
-
-    for console in consoles:
-        children = console.get("__children", [])
-        # print(children)
-        # 1) ProcessCount
-        pc = 0
-        for c in children:
-            prop = c.get("Property","")
-            if prop.endswith(".ProcessCount"):
-                pc = int(c.get("Data") or 0)
-                # break
-            elif prop.endswith(".HistoryBufferCount"):
-                hb_count = int(c.get("Data") or 0)
-
-            elif prop.endswith(".HistoryBufferMax"):
-                hb_max = int(c.get("Data") or 0)
-
-            
-            elif prop.endswith(".CommandCount"):
-                total_cmds += 1
-                if c.get("Data") in (None, "", []):
-                    null_cmds += 1
-
-            elif prop.endswith(".Title"):
-                title = c.get('Data', "")
-
-            elif prop.endswith(".OriginalTitle"):
-                org_title = c.get('Data', "")
-
-            elif prop.endswith(".Dump"):
-                dump_txt = (c.get("Data") or "").lower()
-                if any(kw in dump_txt for kw in IOC_KEYWORDS):
-                    dump_ioc += 1
-            else:
-                continue
-        
-        proc_counts.append(pc)
-        if hb_count is not None and hb_max is not None and hb_count == hb_max:
-            buf_overflow += 1
-        
-        if not_system_path(title) or not_system_path(org_title):
-            title_susp +=1
-
-    avg_proc = sum(proc_counts) / nConhost if nConhost else 0
-    max_proc = max(proc_counts) if proc_counts else 0
-    empty_hist_ratio = (null_cmds / total_cmds) if total_cmds else 0.0
+    dump_ioc = dumps.apply(lambda s: any(kw in s for kw in IOC_KEYWORDS)).sum()
 
     return {
-        'consoles.nConhost'          : nConhost,
-        'consoles.avgProcPerConsole' : round(avg_proc, 2),
-        'consoles.maxProcPerConsole' : int(max_proc),
-        'consoles.emptyHistoryRatio' : round(empty_hist_ratio, 3),
-        'consoles.histBufOverflow'   : buf_overflow,
-        'consoles.titleSuspicious'   : title_susp,
-        'consoles.dumpIoC'           : dump_ioc,
+        'consoles.nConhost': int(nConhost),
+        'consoles.avgProcPerConsole': round(avg_proc, 2),
+        'consoles.maxProcPerConsole': int(max_proc),
+        'consoles.emptyHistoryRatio': round(empty_hist_ratio, 3),
+        'consoles.histBufOverflow': int(buf_overflow),
+        'consoles.titleSuspicious': int(title_susp),
+        'consoles.dumpIoC': int(dump_ioc),
     }
 
-def extract_deskscan_features(jsondump, pids):
+def extract_deskscan_features(jsondump, **kwargs):
     """
     Extractor for windows.deskscan → computes:
       • deskscan.totalEntries         : total number of Desktop objects
@@ -279,6 +258,8 @@ def extract_deskscan_features(jsondump, pids):
     if df.empty:
         return {k : None for k in keys}
 
+    
+    pids = kwargs.get('deskscan', [])
     total = len(df)
     proc_counts = df['Process'].value_counts()
     top_owner   = proc_counts.iloc[0] if not proc_counts.empty else 0
@@ -286,6 +267,10 @@ def extract_deskscan_features(jsondump, pids):
     # ── Orphan desktops ───────────
     defaults     = {"Default", "Winlogon"}
     unique_names = df["Desktop"].dropna().unique()
+    if len(pids):
+        orphan_desktops = sum(1 for pid in df['PID'].values if pid not in pids)
+    else:
+        orphan_desktops = None
 
     return {
         'deskscan.totalEntries'        : total,
@@ -293,7 +278,7 @@ def extract_deskscan_features(jsondump, pids):
         'deskscan.uniqueWinStations'   : df['Window Station'].nunique(),
         'deskscan.session0GuiCount'    : df[(df['Session'] == 0) &  (df['Window Station'] == 'WinSta0')].shape[0],
         'deskscan.topProcDesktopRatio' : float(top_owner / total if total else 0.0),
-        "deskscan.nOrphanDesktops": sum(1 for pid in df['PID'].values if pid not in pids),
+        "deskscan.nOrphanDesktops"     : orphan_desktops,
         'deskscan.nondefaultdesktops': sum(1 for name in unique_names if name not in defaults)
     }
 
@@ -641,7 +626,8 @@ def extract_winInfo_features(jsondump):
         'info.kbuildStr' : df.loc[df['Variable'] == 'KdVersionBlock', 'Value'].iat[0],
         'info.layerdepth' : df["Variable"].str.contains("layer", case=False).sum(),   
     })
-    return features
+
+    return [features.get('info.SystemTime', []), features]
 
 
 def extract_iat_features(jsondump):
@@ -1134,16 +1120,13 @@ def extract_psxview_features(jsondump):
         'psxview.csrss_ratio',     'psxview.pslist_ratio',      'psxview.psscan_ratio',
         'psxview.thrdscan_ratio',  'psxview.all_seen_ratio',    'psxview.none_seen_count',
         'psxview.partial_seen_count','psxview.single_seen_count','psxview.exit_time_ratio',
-        'psxview.avg_offset',      'psxview.offset_std'
-    ]
+        'psxview.avg_offset',      'psxview.offset_std' ]
 
     if df.empty:
         return {k: None for k in keys}
 
     total = len(df)
-    # normalize Exit Time to compute ratio of terminated entries
     df['Exit Time'] = pd.to_datetime(df['Exit Time'], errors='coerce')
-    # count detections per row
     detect_sum = df[['csrss', 'pslist', 'psscan', 'thrdscan']].sum(axis=1)
 
     features = {
@@ -1260,18 +1243,19 @@ def extract_registry_hivelist_features(jsondump):
 
 
 #TODO HIVELIST IS NEEDED cross plugin
-def extract_registry_hivescan_features(jsondump, hivelist_offsets):
+def extract_registry_hivescan_features(jsondump, **kwargs):
     df=pd.read_json(jsondump)
     features = {
         'registry.hivescan.nHives': len(df),
         'registry.hivescan.Children_exist': df['__children'].apply(lambda x: len(x) if isinstance(x, list) else 0).astype(bool).sum()  
     }
 
+    hivelist_offsets = kwargs.get('registry.hivescan', pd.Series(dtype=object))
     offsets = pd.to_numeric(df['Offset'], errors='coerce').dropna().sort_values()
-    orphan_offsets = set(offsets) - set(hivelist_offsets)
+    orphan_offsets = set(offsets) - set(hivelist_offsets) if not hivelist_offsets.empty else None
 
     features.update({
-        'hivescan.orphan_offset_count': int(len(orphan_offsets)),
+        'hivescan.orphan_offset_count': int(len(orphan_offsets)) if orphan_offsets else None,
         'hivescan.too_high_offset_ratio': float((df["Offset"] > 0x7FFFFFFFFFFF).mean()),
         'hivescan.offset_entropy': float(shannon_entropy(df['Offset']))
     })
@@ -1688,23 +1672,22 @@ def extract_threads_features(jsondump):
 
 
 #TODO requires cross-plugin comparison with Threads.json
-def extract_thrdscan_features(jsondump, threads_offsets):
+def extract_thrdscan_features(jsondump, **kwargs):
     df = pd.read_json(jsondump)
 
-    # basic counts and ratios
+    threads_offsets = kwargs.get('thrdscan', pd.Series(dtype=object))
     null_startpath_ratio   = df['StartPath'].isna().mean()
     null_createtime_ratio  = df['CreateTime'].isna().mean()
-    dup_startaddr    = (df.groupby(['PID','StartAddress']).size())   
-    orphan_thread_count = set(df['Offset']) - set(threads_offsets) 
+    dup_startaddr    = (df.groupby(['PID','StartAddress']).size())
+    orphan_thread_count = (set(df['Offset']) - set(threads_offsets)) if not threads_offsets.empty else None
 
     return {
         'thrdscan.nThreads':               len(df),           
         'thrdscan.null_startpath_ratio':   float(null_startpath_ratio),
         'thrdscan.null_createtime_ratio':  float(null_createtime_ratio),
         'thrdscan.duplicate_startaddr_ratio': float(dup_startaddr.gt(1).sum() / len(df)),
-        'thrdscan.orphan_thread_count':  int(len(orphan_thread_count))
+        'thrdscan.orphan_thread_count':  int(len(orphan_thread_count)) if orphan_thread_count else None
     }
-
 
 
 def extract_unhooked_system_calls_features(jsondump):

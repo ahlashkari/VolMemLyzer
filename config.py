@@ -8,12 +8,13 @@ DUMP_TIME = datetime.now(timezone.utc)
 
 BASE_VOL_MODULES = {'info', 'pslist', 'registry.hivelist', 'threads'}
 
-# PLUGIN_DEPENDENCIES = {
-#     'thrdscan': ['threads'],
-#     'registry.hivescan': ['registry.hivelist'],
-#     'deskscan': ['pslist'],
-#     'amcache': ['info'],
-# }
+PLUGIN_DEPENDENCIES = {
+    'thrdscan': 'threads',
+    'registry.hivescan': 'registry.hivelist',
+    'deskscan': 'pslist',
+    # 'psscan' : 'pslist',
+    'amcache': 'info',
+}
 
 VOL_MODULES = {
     'info': extractors.extract_winInfo_features,

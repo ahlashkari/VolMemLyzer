@@ -6,10 +6,6 @@ import pandas as pd
 from collections.abc import Iterable
 from collections import Counter
 
-# from extractors import extract_winInfo_features
-
-# DUMP_TIME = extract_winInfo_features(json)
-
 def invoke_volatility3(vol_py_path, memdump_path, module, output_to):
     with open(output_to,'w') as f:
         subprocess.run(['python',vol_py_path, '-f', memdump_path, '-r=json', 'windows.'+module],stdout=f,text=True, check=True)
@@ -31,11 +27,11 @@ def char_entropy(s: str) -> float:
     return -sum((c / n) * math.log2(c / n) for c in cnt.values())
 
 def flatten_records(rows):
-    """Yield every dict in the tree (top + nested __children)."""
     for r in rows:
         yield r
         for child in r.get("__children", []):
             yield from flatten_records([child])
+
 
 def is_non_ascii(name):
     return any(ord(char) > 127 for char in name)
@@ -43,7 +39,6 @@ def is_non_ascii(name):
 
 def shannon_entropy(obj):
 
-    # ── normalise to a pandas Series ─────────────────────────────────────────
     if isinstance(obj, pd.Series):
         series = obj.dropna()
     elif isinstance(obj, str):
