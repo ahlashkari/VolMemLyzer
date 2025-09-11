@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "volmemlyzer"  # if this name is taken on PyPI, choose a variant like 'volmemlyzer3'
-version = "3.0.0"
+version = "3.0.1"
 description = "Volatility 3-powered memory forensics: parallel plugin runs, DFIR analysis, and ML-ready features."
 readme = "README.md"
 requires-python = ">=3.9"
