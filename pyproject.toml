@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "volmemlyzer"
+version = "3.0.0"
+description = "Volatility 3-powered memory forensics: parallel plugin runs, DFIR analysis, and ML-ready features."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{name = "Yasin Dehfouli" , email="yasind@yorku.ca"}]
+keywords = ["volatility", "forensics", "dfir", "memory", "malware", "security"]
+dependencies = [
+  "volatility3"
+  "pandas>=2.0.0",
+  "numpy>=1.24.0",
+  "python-dateutil>=2.8.2",
+  "tqdm>=4.65.0",
+  "rich>=13.3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/<you>/volmemlyzer"
+Issues = "https://github.com/<you>/volmemlyzer/issues"
+
+[project.scripts]
+volmemlyzer = "volmemlyzer.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["volmemlyzer"]
+include-package-data = true
