@@ -8,7 +8,7 @@
 
 1) **Run mode** – ergonomic “Volatility-as-a-service”: run plugins in parallel, cache outputs, and keep artifact naming/dirs predictable for downstream code.  
 2) **Extract mode** – registry-driven **feature extraction** from plugin outputs, flattened and stable (CSV/JSON) for ML pipelines.  
-3) **Analyze mode** – a stepwise **DFIR triage** workflow (bearings → processes → injections → network → persistence → kernel → report) with clear, Rich-rendered tables.
+3) **Analyze mode** – a stepwise **DFIR triage** workflow (bearings → processes → injections → network → persistence) with clear, Rich-rendered tables.
 
 VolMemLyzer aims to unlock Volatility’s full potential for **researchers** and **analysts** who want frictionless runs inside their own codebases—not just from Volatility’s CLI.
 
