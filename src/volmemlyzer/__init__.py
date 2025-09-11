@@ -4,4 +4,4 @@ from .pipeline import Pipeline
 from .analysis import OverviewAnalysis
 
 __all__ = ["VolRunner", "ExtractorRegistry", "Pipeline", "OverviewAnalysis"]
-__version__ = "3.0.0"
+__version__ = "3.0.1"
