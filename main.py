@@ -1,102 +1,142 @@
-import tempfile
-import functools
-import argparse
-from config import *
-from utils import *
+#!/usr/bin/env python3
+"""
+VolMemLyzer compatibility shim (legacy main.py)
 
-plugin_folder_path = "D:\Vol_Results\AllPluginsJSON"
+Preferred interface: the packaged CLI `volmemlyzer` (see README).
+This script keeps the old "python main.py -f ... -o ... -V ..." workflow alive and
+writes ONE aggregated features file per run:
+  - <outdir>/features/output.csv  (default)
+  - <outdir>/features/output.json
 
-def dropStr_to_dropList(drop_list_str):
-    if not drop_list_str or not drop_list_str.strip():
-        raise ValueError("No module name provided for elimination.")
-    
-    raw_items = drop_list_str.split(",")
-    dropped_modules = {item.strip().lower() for item in raw_items if item.strip()}
+Flags (legacy-compatible):
+  -f, --memdump     Path to a memory image OR a folder of images          (required)
+  -o, --output      Output directory for artifacts & features              (required)
+  -V, --volatility  Path to Volatility3's vol.py                           (required)
+  -D, --drop        Comma-separated plugin list to skip (optional)
+  -P, --plugins     Comma-separated plugin list to include (optional)
+  -F, --format      csv|json (default: csv)
+  -j, --jobs        Parallel workers (default: CPU count)
+      --no-cache    Ignore cached plugin outputs
 
-    # Check for unknown modules (not in VOL_MODULES)
-    invalid_modules = dropped_modules - VOL_MODULES.keys()
-    if invalid_modules:
-        raise ValueError(
-            f"The following modules are not recognized Volatility modules: {sorted(invalid_modules)}.\n"
-            f"Valid Volatility modules are: {sorted(VOL_MODULES.keys())}")
-    return dropped_modules
+The logic here calls the library directly to avoid CLI drift and aggregates into
+a single output file per run.
+"""
+from __future__ import annotations
+import argparse, os, sys, json
+from dataclasses import asdict
+from typing import List, Dict
 
-
-def extract_all_features_from_memdump(memdump_path, CSVoutput_path, volatility_path, drop_list):
-    features = {}
-    context = {}
-    print('=> Outputting to', CSVoutput_path)
-
-
-    with tempfile.TemporaryDirectory() as workdir:
-        vol = functools.partial(invoke_volatility3, volatility_path, memdump_path)
-               
-        if drop_list:
-            dropped_modules = dropStr_to_dropList(drop_list)
-        else: 
-            dropped_modules = []
-
-        for module, extractor in VOL_MODULES.items():
-            if module.lower() in dropped_modules:
-                print(f'=> Skipping module: {module}')
-                continue
-            print('=> Executing Volatility module', repr(module))
-            # output_file_path = os.path.join(workdir, module)
-            # vol(module, output_file_path)
-
-            module_pre_output_name = module.replace('.','_')
-            file_list = [filename for filename in os.listdir(plugin_folder_path) if (f'windows_{module_pre_output_name}') in filename]
-           
-            if len(file_list) != 0:
-                # output = output_file_path[0]
-                output = os.path.join(plugin_folder_path, [filename for filename in os.listdir(plugin_folder_path) if (f'windows_{module_pre_output_name}') in filename][0])
-            else: 
-                continue  
-
-            module_deps = [str(PLUGIN_DEPENDENCIES.get(module, []))]
-            kwargs = {module : context[dep] for dep in module_deps if dep in context.keys()}
-            result = extractor(output, **kwargs)
-
-            if isinstance(result, list) and isinstance(result[1], dict):
-                data, feat = result
-                features.update(feat)
-                context[module] = data
-            elif isinstance(result, dict):
-                features.update(result)
-            else:
-                raise ValueError(f"Extractor for {module} returned unexpected format")
-
-    features_mem = {'mem.name_extn': str(memdump_path).rsplit('/', 1)[-1]}
-    features_mem.update(features)
-
-    file_path = os.path.join(CSVoutput_path, 'output.csv')
-    write_dict_to_csv(file_path,features_mem,memdump_path)
-
-    print('=> All done')
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument('-f','--memdump',default=None, help='Path to folder/directory which has all memdumps',required = True)
-    p.add_argument('-o', '--output', default=None, help='Path to the folder where to output the CSV',required = True)
-    p.add_argument('-V', '--volatility', default=None, help='Path to the vol.py file in Volatility folder including the extension .py',required = True)
-    p.add_argument('-D', '--drop', default=None, help='Plugin names to drop from the features list',required = False)
-    return p, p.parse_args()
+try:
+    # 1) Preferred: installed package (pip install -e .)
+    from volmemlyzer.runner import VolRunner
+    from volmemlyzer.extractor_registry import ExtractorRegistry
+    from volmemlyzer.plugins import build_registry
+    from volmemlyzer.pipeline import Pipeline
+except ImportError:
+    import sys, pathlib
+    repo_root = pathlib.Path(__file__).resolve().parent
+    src_dir = repo_root / "src"
+    # 2) Dev clone with src/ layout
+    if (src_dir / "volmemlyzer").exists():
+        sys.path.insert(0, str(src_dir))
+        from volmemlyzer.runner import VolRunner
+        from volmemlyzer.extractor_registry import ExtractorRegistry
+        from volmemlyzer.plugins import build_registry
+        from volmemlyzer.pipeline import Pipeline
 
 
-if __name__ == '__main__':
-    p, args = parse_args()
-    folderpath = str(args.memdump)
-    file_list = sorted(os.listdir(folderpath), key=lambda x: -os.path.getmtime(os.path.join(folderpath, x)), reverse=True)
+SUPPORTED_EXTS = {".vmem", ".raw", ".dmp", ".bin", ".mem"}
 
-    print(folderpath)
+def find_images(path: str) -> List[str]:
+    if os.path.isfile(path):
+        return [path]
+    found = []
+    for root, _, files in os.walk(path):
+        for name in files:
+            if os.path.splitext(name)[1].lower() in SUPPORTED_EXTS:
+                found.append(os.path.join(root, name))
+    return sorted(found)
 
-    for filename in file_list:
-        print("==> Now resolving features for : ",filename)
-        print()
-        file_path = os.path.join(folderpath, filename)
-        #print(file_path)
+def flatten_feature_row(row: Dict) -> Dict:
+    # bring nested 'features' dict to top level
+    flat = dict(row)
+    feats = flat.pop("features", {}) or {}
+    for k, v in feats.items():
+        flat[k] = v
+    return flat
 
-        if (file_path).endswith('.raw') or (file_path).endswith('.mem') or (file_path).endswith('.vmem') or (file_path).endswith('.mddramimage'):
-            extract_all_features_from_memdump((file_path), args.output, args.volatility, args.drop)
+def write_csv_aggregated(rows: List[Dict], csv_path: str) -> None:
+    import csv
+    os.makedirs(os.path.dirname(os.path.abspath(csv_path)), exist_ok=True)
+    # union of all keys
+    keys = []
+    seen = set()
+    for r in rows:
+        for k in r.keys():
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
 
-        break
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(
+        description="VolMemLyzer legacy entry point (aggregated features output)."
+    )
+    p.add_argument("-f", "--memdump", required=True, help="Memory image file or directory")
+    p.add_argument("-o", "--output", required=True, help="Artifacts/output directory")
+    p.add_argument("-V", "--volatility", required=True, help="Path to Volatility3 vol.py")
+    p.add_argument("-D", "--drop", default=None, help="Comma-separated plugins to skip")
+    p.add_argument("-P", "--plugins", default=None, help="Comma-separated plugins to include")
+    p.add_argument("-F", "--format", default="csv", choices=["csv","json"], help="Aggregated features format")
+    p.add_argument("-j", "--jobs", type=int, default=max(1, os.cpu_count() or 1), help="Parallel workers")
+    p.add_argument("--no-cache", action="store_true", help="Ignore cached plugin outputs")
+    args = p.parse_args(argv)
+
+    print("[DEPRECATION] main.py is a compatibility shim. Prefer `volmemlyzer ...` CLI.", file=sys.stderr)
+
+    # Build pipeline
+    runner = VolRunner(vol_path=args.volatility, default_renderer="json", default_timeout_s=None)
+    registry: ExtractorRegistry = build_registry()
+    pipe = Pipeline(runner, registry)
+
+    images = find_images(args.memdump)
+    if not images:
+        p.error(f"No supported memory images found under: {args.memdump}")
+
+    outdir = args.output
+    feat_dir = os.path.join(outdir, "features")
+    os.makedirs(feat_dir, exist_ok=True)
+    aggregated_rows = []
+
+    enable = set(x.strip() for x in (args.plugins or "").split(",") if x.strip()) or None
+    drop = set(x.strip() for x in (args.drop or "").split(",") if x.strip()) or None
+
+    for img in images:
+        row = pipe.run_extract_features(
+            image_path=img,
+            enable=enable,
+            drop=drop,
+            concurrency=args.jobs,
+            artifacts_dir=outdir,
+            use_cache=(not args.no_cache),
+        )
+        flat = flatten_feature_row(asdict(row))
+        aggregated_rows.append(flat)
+
+    if args.format == "csv":
+        out_path = os.path.join(feat_dir, "output.csv")
+        write_csv_aggregated(aggregated_rows, out_path)
+    else:
+        out_path = os.path.join(feat_dir, "output.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(aggregated_rows, f, ensure_ascii=False, indent=2)
+
+    print(f"[+] Wrote aggregated features → {out_path}")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
