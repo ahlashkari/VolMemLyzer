@@ -1,379 +1,657 @@
-
 # VolMemLyzer (Volatile Memory Analyzer)
-[![GPLv3 License](https://img.shields.io/badge/License-GPL%20v3-yellow.svg)](https://opensource.org/licenses/)
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/Python-3.9+-blue)
+![Volatility](https://img.shields.io/badge/Volatility-3.x-black)
+
+**VolMemLyzer** is a modular memory forensics toolkit that wraps **Volatility 3** with three complementary workflows:
+
+1) **Run mode** – ergonomic “Volatility-as-a-service”: run plugins in parallel, cache outputs, and keep artifact naming/dirs predictable for downstream code.  
+2) **Extract mode** – registry-driven **feature extraction** from plugin outputs, flattened and stable (CSV/JSON) for ML pipelines.  
+3) **Analyze mode** – a stepwise **DFIR triage** workflow (bearings → processes → injections → network → persistence) with clear, Rich-rendered tables.
+
+VolMemLyzer aims to unlock Volatility’s full potential for **researchers** and **analysts** who want frictionless runs inside their own codebases—not just from Volatility’s CLI.
+
+---
 
 
-Memory forensics is essential in cybersecurity and digital forensics, especially for fighting advanced threats and malware. In this dynamic environment, memory analysis tools and methods must be efficient. By prioritising the prominent features in a memory, investigators can speed up their analysis.
-The **VolMemLyzer** (Volatile Memory Analyzer) can extract over **250 features** from memory snapshots, speeding up analysis and enabling deeper explorations. It serves as a catalyst for memory forensics research and innovation.
 
-The new VolMemLyzer-V2 is a tool based on **functional programming paradigm** with dependencies on updated Volatility3 Framework based on python 3.
+## Table of contents
 
-## Extracted Features
+- [Quickstart (Compatibility Shim)](#quickstart-compatibility-shim)
+- [Why v3 (at a glance)](#why-v3-at-a-glance)
+- [Key capabilities](#key-capabilities)
+- [How it fits together](#how-it-fits-together)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [CLI usage (volmemlyzer)](#cli-usage-volmemlyzer)
+  - [Global options](#global-options)
+  - [analyze](#analyze)
+  - [run](#run)
+  - [extract](#extract)
+  - [Feature Catalog (Index)](#feature-catalog-index)
+  - [list](#list)
+- [Python API](#python-api)
+- [Artifacts, formats & caching](#artifacts-formats--caching)
+- [Performance tips](#performance-tips)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+- [License](#license)
+- [Team Members](#team-members)
+- [Acknowledgement](#acknowledgement)
 
-The taxonoy of the features produced by VolMemLyzer which based on plugin structure is summarised below using this interactive sunburst chart:
 
+---
 
-![Alt text](images/VolMemLyzerBurstGIF.gif)
+## Quickstart (Compatibility Shim)
+Heads up about `main.py` (compatibility shim): A small `main.py` is included **only** for backward compatibility with older docs/scripts. It accepts the legacy flags and produces a **single aggregated features file** per run.
+If you don't need this legacy entry point, you can remove `main.py`. Keeping it won't cause drift because it calls the library directly.
 
-## Pre-requisites
+**Preferred interface:** use the packaged CLI command `volmemlyzer` (see below).  
+- CSV → `<outdir>/features/output.csv` (one row per image)  
+- JSON → `<outdir>/features/output.json`
 
-#### Volatility
+### Quickstart with `main.py`
 
-For Linux, install **volatility** via apt:
+**Process a single dump**
 ```bash
-  sudo apt install volatility 
+python main.py \
+  -f /path/to/images/IMAGE.mem \
+  -o ./out \
+  -V /path/to/volatility3/vol.py
 ```
-For other Linux distributions, look for corresponding built-in software repositories, or install https://github.com/volatilityfoundation/volatility from source code.
-#### Other Pre-requisites
 
-Out of all libraries used, only **pandas** library is not part of the Python standard library and must be installed separately using pip via:
+**Batch a folder of dumps (recursive)**
 ```bash
-  pip install pandas
+python main.py \
+  -f /path/to/images/ \
+  -o ./out \
+  -V /path/to/volatility3/vol.py
 ```
 
+The tool writes **`out/features/output.csv`** with **one row per image**.
 
-## Deployment
+**Speed up triage** by skipping heavy plugins (Not using the --drop or --plugins will result in running all plugins in the plugins.py). example: 
+```bash
+python main.py -f ./mem -o ./out -V ./volatility3/vol.py \
+  -D "dumpfiles,filescan,mftscan,driverscan,mutantscan,modscan,netscan,poolscanner,symlinkscan,callbacks,deskscan,devicetree,driverirp,drivermodule,windowstations"
+```
 
-#### Step 1:
-Complete pre-requisites and download the VolMemLyzer script from above to the desired folder. Navigate to the folder where the script was downloaded and initiate terminal/powershell in the folder.
+**Legacy options (main.py)**
+```text
+-f, --memdump     Path to a memory image OR a folder of images          (required)
+-o, --output      Output directory for artifacts & features              (required)
+-V, --volatility  Path to Volatility3's vol.py                           (required)
+-D, --drop        Comma-separated plugin list to skip (e.g., "filescan,modscan")
+-P, --plugins     Comma-separated plugin list to include
+-F, --format      csv|json (default: csv)
+-j, --jobs        Parallel workers
+    --no-cache    Ignore cached plugin outputs
+```
 
-#### Step 2:
-Use the command given below:
+---
+## Why v3 (at a glance)
+
+- **Modular architecture** (Runner → Registry → Pipeline → Analysis/TUI → CLI) so you can import only the pieces you need.  
+- **Research-friendly UX**: parallel plugin execution, caching & (where possible) output conversion to avoid reruns, stable artifact naming, and one-row-per-image **FeatureRow** for ML.  
+- **DFIR triage workflow**: opinionated but explainable steps with clean tables (thanks to **Rich**).  
+- **Stable, flat features**: consistent columns across images, robust null handling, clear `plugin.metric` naming.
+
+---
+
+## Key capabilities
+
+- **Run Volatility 3 plugins** with:
+  - parallelism (`-j/--jobs`),
+  - per-plugin timeouts,
+  - per-run renderer choice,
+  - cache reuse with optional conversion to the needed format (see notes below).
+  - Complete end-to-end pipeline capable of automatic resolving of the volatility path (Runs as service)
+
+- **Extract features** from selected plugins via a **registry** of extractor functions:
+  - flatten to a single **CSV/JSON** file per run (**one row per image**),
+  - ML-ready features with consistent naming,
+  - dependency-aware scheduling of plugins.
+
+- **Perform an analysis** as a **multi-step** DFIR overview (which can  be outputted in json):
+  - 0 Bearings (`windows.info`)
+  - 1 Processes (`pslist`+ `psscan`+ `psxview`+ `pstree` + cross-checks)
+  - 2 Injections (`malfind`)
+  - 3 Network (`netscan`)
+  - 4 Persistence (registry/tasks : `scheduled_tasks` + `userassist` +`hivelist/hivescan`)
+
+---
+
+## How it fits together
+
+```
+CLI ──► Pipeline ──► VolRunner (vol.py) ──► artifacts/*.json|jsonl|csv|txt
+                    │
+                    ├─► Extractors (registry) ──► FeatureRow rows → output.csv
+                    │
+                    └─► OverviewAnalysis (steps) ──► Rich tables / JSON summary
+```
+
+- **VolRunner** builds/executes `vol.py` commands and names outputs predictably:  
+  `<outdir>/<imagebase>_<plugin>.<ext>` plus `<…>.stderr.txt` on errors.
+- **Pipeline** orchestrates parallel runs, caching, and (when supported) format conversion to avoid re-running a plugin just to change formats.
+- **ExtractorRegistry** binds a plugin spec (`windows.pslist`, deps, default renderer/timeout) to a Python extractor function. All available    volatility plugins are added by default 
+- **OverviewAnalysis** implements the triage steps; **TerminalUI** (Rich) prints academic-style tables with a tasteful left accent bar.
+
+---
+
+## Requirements
+
+- Python **3.9+**
+- A local checkout/installation of **Volatility 3**; you will point VolMemLyzer at `vol.py` using `--vol-path` (or `VOL_PATH` env).  
+  VolMemLyzer **does not import** Volatility; it **invokes** it as a subprocess.
+- Python packages (installed automatically if you use `pip install`):
+  - `pandas`, `numpy`, `python-dateutil`, `tqdm`, `rich`
+
+> Tested primarily with Windows images (e.g., `.vmem`, `.raw`, `.dmp`, `.bin`). Other OSes may work where Volatility supports them.
+
+**Zero-friction Volatility path (no --vol-path needed):** 
+In v3, if you don’t pass --vol-path, VolMemLyzer automatically resolves Volatility 3 in this order: (1) any explicit hint you provided (--vol-path or the VOL_PATH env var); (2) an importable module in the current environment — it launches python -m volatility3; (3) the vol console script on your PATH; and (4) a few common local vol.py locations. This removes path-hunting and venv confusion, so most users can run one-line commands with sane defaults, while power users can still pin a specific checkout by supplying --vol-path. The result is a cleaner, faster CLI with fewer errors and zero reliance on hard-coded filesystem paths.
+
+---
+
+## Installation
+
+### From PyPI (recommended once published)
+```bash
+pip install volmemlyzer
+# then the CLI is available as:
+volmemlyzer --help
+```
+
+<!-- you should see the help page like this: ![alt text](image.png) -->
+
+### From source (develop/editable)
+```bash
+git clone https://github.com/<you>/volmemlyzer.git
+cd volmemlyzer
+pip install -e .
+# or, without packaging:
+pip install -r requirements.txt
+python -m volmemlyzer.cli --help or volmemlyzer --help
+```
+
+<!-- **Environment knobs (optional):**
+
+- `VOL_PATH` – default path to `vol.py`
+- `VMY_RENDERER` – default renderer (e.g., `json`)
+- `VMY_TIMEOUT` – default timeout in seconds (0 disables)
+- `VMY_LOG` – log level (`INFO`, `DEBUG`, …) -->
+
+---
+<!-- 
+## CLI usage (volmemlyzer)
+
+The packaged CLI exposes **analysis**, **run**, **features**, and **list** subcommands.
+
+### Global options
+```
+--vol-path PATH     Path to volatility3 vol.py  Optional(env: VOL_PATH) except when no vol.py is detected by volmemlyzer
+--renderer NAME     Volatility output renderer format (json/jsonl/csv/pretty/quick/none : **json default**)
+--timeout SECONDS   Per-plugin timeout (default : 0 disables)
+-j, --jobs N        Parallel workers (default : 0.5 * of available CPUs)
+--log-level LEVEL   CRITICAL|ERROR|WARNING|INFO|DEBUG
+```
+
+### `analysis`
+Run DFIR triage steps over one image. 
 
 ```bash
-  python3 VolMemLyzer-V2.py -f <Path to Memory Dump Folder> -o <Path to Output Folder> -V <Path to Volatility3>
+volmemlyzer \
+  --vol-path "C:\tools\volatility3\vol.py" --renderer json --timeout 600 -j 4 \
+  analysis -i "D:\dumps\host.vmem" -o "D:\dumps\.volmemlyzer" \
+  --steps 0,1,2,3,4,5,6 --json "D:\dumps\reports\host.overview.json" \
+  --no-cache
 ```
 
-The Placeholders should strictly follow:
-- **Path to Memory Dump Folder** - This should be an absolute path to the folder containing memory dump files. Ex: */home/user1/Desktop/MemoryDumps*
-- **Path to Output Folder** - This should be an absolute path to the folder where the *output.csv* is to be stored. Ex: */home/user1/Desktop/VolMemLyzerOutput*
-- **Path to Volatility3** - This should be an absolute path to the *vol.py* file in the downloaded volatility folder from official Volatility3 Github. Ex: */home/user1/Desktop/Volatility3/vol.py*
+Options:
+- `-i/--image` (required): memory image file
+- `-o/--outdir`: artifacts directory (default is created near the image)
+- `--steps` (comma list or aliases: `bearings|info`, `processes|proc|ps`, `injections|malfind`, `network|net|netscan`, `persistence|reg|tasks`, `kernel`, `report`)
+- `--json`: write the step summary to a JSON file
+- `--high-level`: when supported, show only the highest-risk findings
+- `--no-cache`: ignore cached plugin outputs
+
+### `run`
+Run raw Volatility plugins (parallel, cached, selected renderer).
+
+```bash
+volmemlyzer \
+  --vol-path /opt/volatility3/vol.py --renderer json -j 6 \
+  run -i /cases/win10.raw -o /cases/.volmemlyzer \
+  --plugins pslist,pstree,psscan --no-cache
+```
+
+Options:
+- `-i/--image` (required): memory image file
+- `-o/--outdir`: artifacts directory (default near the image)
+- `--renderer`: renderer for this run (`json|jsonl|csv|pretty|quick|none`)
+- `--plugins`: comma list to include
+- `--drop`: comma list to exclude
+- `--no-cache`: ignore cached outputs
+
+**Output:**  
+The CLI prints the artifacts directory and each plugin’s output path:
+```
+[+] raw artifacts directory: /cases/.volmemlyzer
+  - pslist              → /cases/.volmemlyzer/win10.raw_pslist.json
+  - pstree              → /cases/.volmemlyzer/win10.raw_pstree.json
+  ...
+```
+
+### `features`
+Extract features for a single image **or an entire directory (recursively)**, and write a **single aggregated file** (one row per image).
+
+```bash
+# Single file → append/update one row in <outdir>/features/output.csv
+volmemlyzer \
+  --vol-path /opt/volatility3/vol.py -j 4 \
+  features -i /cases/win10.raw -o /cases/.volmemlyzer \
+  -f csv --plugins pslist,malfind
+```
 
 
-### Features 
-Here is the list of features that VolMemLyzer V2.0.0 will stract from each memory snapshot:
-1. mem name
-	- mem.name_extn
-2. info
-  	- info.Is64
-	- info.winBuild
-	- info.npro	
-	- info.IsPAE	
-3. PsList
-	- pslist.nproc	
-	- pslist.nppid	
-	- pslist.avg_threads	
-	- pslist.avg_handlers	
-	- pslist.nprocs64bit	
-	- pslist.outfile
-4. DLLList	
-	- dlllist.ndlls	
-	- dlllist.nproc_dll	
-	- dlllist.avg_dllPerProc	
-	- dlllist.avgSize	
-	- dlllist.outfile	
-5. Handles
-	- handles.nHandles	
-	- handles.distinctHandles	
-	- handles.nproc	
-	- handles.nAccess	
-	- handles.avgHandles_per_proc	
-	- handles.nTypePort	
-	- handles.nTyepProc	
-	- handles.nTypeThread	
-	- handles.nTypeKey	
-	- handles.nTypeEvent	
-	- handles.nTypeFile	
-	- handles.nTypeDir	
-	- handles.nTypeSec	
-	- handles.nTypeDesk	
-	- handles.nTypeToken	
-	- handles.nTypeMutant	
-	- handles.nTypeKeyEvent	
-	- handles.nTypeSymLink	
-	- handles.nTypeSemaph	
-	- handles.nTypeWinSta	
-	- handles.nTypeTimer	
-	- handles.nTypeIO	
-	- handles.nTypeWmi	
-	- handles.nTypeWaitPort	
-	- handles.nTypeJob	
-	- handles.nTypeUnknown	
-6. Idr Modules
-	- ldrmodules.total	
-	- ldrmodules.not_in_load	
-	- ldrmodules.not_in_init	
-	- ldrmodules.not_in_mem	
-	- ldrmodules.nporc	
-	- ldrmodules.not_in_load_avg	
-	- ldrmodules.not_in_init_avg	
-	- ldrmodules.not_in_mem_avg	
-7. MalFind
-	- malfind.ninjections	
-	- malfind.commitCharge	
-	- malfind.protection	
-	- malfind.uniqueInjections	
-	- malfind.avgInjec_per_proc	
-	- malfind.tagsVad	
-	- malfind.tagsVads	
-	- malfind.aveVPN_diff	
-	- modules.nmodules	
-	- modules.avgSize	
-	- modules.FO_enabled	
+```bash
+# Directory (recursive) → creates one file per dump into the <outdir>/features folder 
+# Use main.py (Fall-Back Version v2) for aggregating one row per dump into a single output.csv 
+volmemlyzer \
+  --vol-path /opt/volatility3/vol.py -j 4 \
+  features -i /cases/ -o /cases/.volmemlyzer -f csv
+```
 
-8. Call Backs
-	- callbacks.ncallbacks	
-	- callbacks.nNoDetail	
-	- callbacks.nBugCheck	
-	- callbacks.nBugCheckReason	
-	- callbacks.nCreateProc	
-	- callbacks.nCreateThread	
-	- callbacks.nLoadImg	
-	- callbacks.nRegisterCB	
-	- callback.nUnknownType	
+Options:
+- `-i/--image` (required): **file or directory**. Directories are scanned for `*.vmem, *.raw, *.dmp, *.bin` recursively.
+- `-o/--outdir`: artifacts directory (default near each image)
+- `-f/--format`: `json` or `csv` (required)
+- `--plugins`: comma list to **restrict** extraction
+- `--drop`: comma list to **exclude**
+- `--no-cache`: ignore cached outputs
 
-9. CMD Line
-	- cmdline.nLine	
-	- cmdline.not_in_C	
-	- cmdline.n_exe	
-	- cmdline.n_bin	
-
-10. Device Tree
-	- devicetree.ndevice	
-	- devicetree.nTypeNotDRV	
-
-11. Driverirp (Driver IRP hook detection)
-	- driverirp.nIRP	
-	- driverirp.nModules	
-	- driverirp.nSymbols	
-	- driverirp.n_diff_add	
-	- drivermodule.nModules	
-	- driverscan.nscan	
-	- driverscan.avgSize	
-12. envars (Display process environment variables)
-	- envars.nVars	
-	- envars.nProc	
-	- envars.nBlock	
-	- envars.n_diff_var	
-	- envars.nValue	
-13. File Scan
-	- filescan.nFiles	
-	- filescan.n_diff_file	
-14. getsid (The SIDs owning each process)
-	- getsids.nSIDcalls	
-	- getsids.nProc	
-	- getsids.nDiffName	
-	- getsids.n_diff_sids	
-	- getsids.avgSIDperProc	
-15. MBRScan (Scans Master Boot Records (MBRs))
-	- mbrscan.nMBRentries	
-	- mbrscan.nDiskSig	
-	- mbrscan.nPartType	
-	- mbrscan.bootable	
-
-16. MFTScan (Scan for potential MFT entries)
-	- mftscan.nEntriesMFT	
-	- mftscan.nAttributeType	
-	- mftscan.nRecordType	
-	- mftscan.AvgRecordNum	
-	- mftscan.AvgLinkCount	
-	- mftscan.0x9_typeMFT	
-	- mftscan.0xd_typeMFT	
-	- mftscan.DirInUse_typeMFT	
-	- mftscan.Removed_typeMFT	
-	- mftscan.File_typeMFT	
-	- mftscan.Other_typeMFT	
-	- mftscan.AvgChildren	
-
-17. ModScan (Pool scanner for kernel modules)
-	- modscan.nMod	
-	- modscan.nUniqueExt	
-	- modscan.nDLL	
-	- modscan.nSYS	
-	- modscan.nEXE	
-	- modscan.nOthers	
-	- modscan.AvgSize	
-	- modscan.MeanChildExist	
-	- modscan.FO_Enabled	
-
-18.mutanscan (Pool scanner for mutex objects) 
-	- mutantscan.nMutantObjects	
-	- mutantscan.nNamedMutant	
-
-19. net scan (Scan a Vista (or later) image for connections and sockets)
-	- netscan.nConn	
-	- netscan.nDistinctForeignAdd	
-	- netscan.nDistinctForeignPort	
-	- netscan.nDistinctLocalAddr	
-	- netscan.nDistinctLocalPort	
-	- netscan.nOwners	
-	- netscan.nDistinctProc	
-	- netscan.nListening	
-	- netscan.Proto_TCPv4	
-	- netscan.Proto_TCPv6	
-	- netscan.Proto_UDPv4	
-	- netscan.Proto_UDPv6	
-
-20. netstat (network active connections)
-	- netstat.nConn	
-	- netstat.nDistinctForeignAdd	
-	- netstat.nUnexpectForeignAdd	
-	- netstat.nDistinctLocalAddr	
-	- netstat.nUnexpectLocalAddr	
-	- netstat.nDistinctLocalPort	
-	- netstat.nOwners	
-	- netstat.nDistinctProc	
-	- netstat.nListening	
-	- netstat.nEstablished	
-	- netstat.nClose_wait	
-	- netstat.Proto_TCPv4	
-	- netstat.Proto_TCPv6	
-	- netstat.Proto_UDPv4	
-	- netstat.Proto_UDPv6	
-	- netstat.nNaNPID	
-
-21. Pool Scanner
-	- poolscanner.nPool	
-	- poolscanner.nUniquePool	
-
-22. Privileges
-	- privileges.nTotal	
-	- privileges.nUniquePrivilege	
-	- privileges.nPID	
-	- privileges.nProcess	
-	- privileges.nAtt_D	
-	- privileges.nAtt_P	
-	- privileges.nAtt_PE	
-	- privileges.nAtt_PED	
-	- privileges.nAtt_NaN	
-
-23. PSTree (process list as a tree)
-	- pstree.nTree	
-	- pstree.nHandles	
-	- pstree.nPID	
-	- pstree.nPPID	
-	- pstree.AvgThreads	
-	- pstree.nWow64	
-	- pstree.AvgChildren	
-
-24. Registry
-	- registry.certificates.nCert	
-	- registry.certificates.nID_Auto	
-	- registry.certificates.nID_Protected	
-	- registry.certificates.nID_Others	
-	- registry.hivelist.nFiles	
-	- registry.hivelist.nFO_Enabled	
-	- registry.hivescan.nHives	
-	- registry.hivescan.Children_exist	
-	- registry.printkey.nKeys	
-	- registry.printkey.nDistinct	
-	- registry.printkey.nType_key	
-	- registry.printkey.nType_other	
-	- registry.printkey.Volatile_0	
-	- registry.printkey.Avg_Children	
-	- registry.userassist.n	
-	- registry.userassist.nUnique	
-	- registry.userassist.Avg_Children	
-	- registry.userassist.path_DNE	
-	- registry.userassist.type_key	
-	- registry.userassist.type_other	
-
-25. Sessions (details on _MM_SESSION_SPACE (user logon sessions))
-	- sessions.nSessions	
-	- sessions.nProcess	
-	- sessions.nUsers	
-	- sessions.nType	
-	- sessions.Children_exist	
-
-26. Skeleton Key
-	- skeleton_key.nKey		
-	- skeleton_key.nProcess	
-	- skeleton_key.Found_True	
-	- skeleton_key.Found_False	
-
-27. ssdt (SSDT entries)
-	- ssdt.n	
-	- ssdt.nIndex	
-	- ssdt.nModules	
-	- ssdt.nSymbols	
-	- ssdt.Children_exist	
-
-28. Statistics
-	- statistics.Invalid_all	
-	- statistics.Invalid_large	
-	- statistics.Invalid_other	
-	- statistics.Swapped_all	
-	- statistics.Swapped_large	
-	- statistics.Valid_all	
-	- statistics.Valid_large	
-
-29. SVScan (Scan for Windows services)
-	- svcscan.nServices	
-	- svcscan.nUniqueServ	
-	- svcscan.State_Run	
-	- svcscan.State_Stop	
-	- svcscan.Start_Sys	
-	- svcscan.Start_Auto	
-	- svcscan.Type_Own_Share	
-	- svcscan.Type_Own	
-	- svcscan.Type_Share	
-	- svcscan.Type_Own_Interactive	
-	- svcscan.Type_Share_Interactive	
-	- svcscan.Type_Kernel_Driver	
-	- svcscan.Type_FileSys_Driver	
-	- svcscan.Type_Others	
-
-30. symlinksscan (Pool scanner for symlink objects)
-	- symlinkscan.nLinks	
-	- symlinkscan.nFrom	
-	- symlinkscan.nTo	
-	- symlinkscan.Avg_Children	
-
-31. vad info (Dump the VAD info)
-	- vadinfo.nEntries	
-	- vadinfo.nFile	
-	- vadinfo.nPID	
-	- vadinfo.nParent	
-	- vadinfo.nProcess	
-	- vadinfo.Process_Malware	
-	- vadinfo.Type_Vad	
-	- vadinfo.Type_VadS	
-	- vadinfo.Type_VadF	
-	- vadinfo.Type_VadI	
-	- vadinfo.Protection_RO	
-	- vadinfo.Protection_RW	
-	- vadinfo.Protection_NA	
-	- vadinfo.Protection_EWC	
-	- vadinfo.Protection_WC	
-	- vadinfo.Protection_ERW	
-	- vadinfo.Avg_Children	
-
-32. vadwalk (Walk the VAD tree)
-	- vadwalk.Avg_Size	
-
-33. ver info (version information from PE images)
-	- verinfo.nEntries	
-	- verinfo.nUniqueProg	
-	- verinfo.nPID	
-	- verinfo.Avg_Children	
-
-34. virtmap (virtual file in memory)
-	- virtmap.nEntries	
-	- virtmap.Avg_Offset_Size	
-	- virtmap.Avg_Children
+**Output:**  
+Features are written to a **single file** per run under `<outdir>/features/`:  
+- CSV → `<outdir>/features/output.csv`  
+- JSON → `<outdir>/features/output.json` -->
 
 
+## CLI usage (volmemlyzer)
 
-## Improvements (V2.0.0 vs V1.0.0)
-- Now supports 250+ features compared to less than 75 earlier.
-- Supports latest Volatility 3 Framework rather than outdated Volatility 2 Framework.
-- Now runs on python 3 rather than python 2.
-- Improved redundancy - Exception handling support if dataframe is not created or incorrectly created.
-- Improved computability with pandas.
-- Scope of types of files supported increased.
+To make the CLI easy to grasp, **each mode below shows two examples**:
+- **Simple** — the cleanest command that relies on smart defaults (no friction).
+- **Complete** — the fully flexible form with all commonly used arguments shown.
 
-NOTE: Future updates should include support for more third party plugins and better exception handling capabilities.
+The packaged CLI exposes **analyze**, **run**, **extract**, and **list** subcommands.
 
+### Global options
+```
+--vol-path PATH     Path to 'vol' or 'vol.py'  (optional; auto-detected if omitted, env: VOL_PATH)
+--renderer NAME     Volatility renderer: json | jsonl | csv | pretty | quick | none   (default: json)
+--timeout SECONDS   Per-plugin timeout in seconds (default: 0 = disabled)
+-j, --jobs N        Parallel workers (default: CPU count)
+--log-level LEVEL   CRITICAL | ERROR | WARNING | INFO | DEBUG
+```
+
+#### Defaults (when omitted)
+- **Volatility**: auto-detected (prefer `python -m volatility3`, then `vol` on PATH).
+- **Outdir**: `<image_dir>/.volmemlyzer` (created if missing).
+- **Renderer**: `json`.
+- **Timeout**: `0` (disabled).
+- **Jobs**: 1 (No paralellism unless user incerements the jobs).
+- **Caching**: enabled (omit `--no-cache` to reuse artifacts).
+
+---
+
+### `analyze`
+Run DFIR triage steps over one image.
+
+**Simple (all defaults)**
+```bash
+volmemlyzer analyze -i "D:\dumps\host.vmem"
+```
+_Runs steps **0–4** (bearings → persistance), writes artifacts to `D:\dumps\.volmemlyzer`, renderer `json`, no parallelization in plugin runs, caching on._
+
+**Complete (all key flags)**
+```bash
+# PowerShell line continuations shown with ^
+volmemlyzer ^
+  --vol-path "C:\tools\volatility3\vol.py" --renderer json --timeout 600 -j 4 ^
+  analyze -i "D:\dumps\host.vmem" -o "D:\dumps\.volmemlyzer" ^
+  --steps 0,1,2 --json ^
+  --no-cache
+```
+_Runs steps **0–2** (bearings → Injections), all plugin runs have 10 minute timeouts, using four jobs for paralellization, writes artifacts to `D:\dumps\.volmemlyzer`_, _and an output file to`/cases/.volmemlyzer/analysis/win10.raw.json` (outdir inferred), caching off._
+
+Options:
+- `-i/--image` (required): memory image file  
+- `-o/--outdir`: artifacts directory (default near the image, as shown above)  
+- `--steps` (comma list or aliases: `bearings|info`, `processes|proc|ps`, `injections|malfind`, `network|net|netscan`, `persistence|reg|tasks`, `kernel`, `report`)  
+- `--json`: write the step summary to a JSON file   
+- `--high-level`: when supported, show only the highest-risk findings  
+- `--no-cache`: ignore cached plugin outputs  
+
+---
+
+### `run`
+Run raw Volatility plugins (parallel, cached, selected renderer).
+
+**Simple (defaults + pick plugins to run)**
+```bash
+volmemlyzer run -i /cases/win10.raw --plugins pslist,pstree,psscan
+```
+_Writes artifacts to `/cases/.volmemlyzer`, renderer `json`, no parallelization in plugin runs, caching on._
+
+**Complete (all key flags)**
+```bash
+volmemlyzer  --vol-path /opt/volatility3/vol.py --renderer json -j 6   run -i /cases/win10.raw -o /cases/.volmemlyzer (--plugins pslist,pstree,psscan or --drop netscan) --no-cache
+```
+**Note that the drop and plugins should not be used together**
+
+Options:
+- `-i/--image` (required): memory image file  
+- `-o/--outdir`: artifacts directory (default near the image)  
+- `--renderer`: renderer for this run (`json|jsonl|csv|pretty|quick|none`)  
+- `--plugins`: comma list to include  
+- `--drop`: comma list to exclude  
+- `--no-cache`: ignore cached outputs  
+
+**Output:**  
+The CLI prints the artifacts directory and each plugin’s output path:
+```
+[+] raw artifacts directory: /cases/.volmemlyzer
+  - pslist              → /cases/.volmemlyzer/win10.raw_pslist.json
+  - pstree              → /cases/.volmemlyzer/win10.raw_pstree.json
+  ...
+```
+
+---
+
+### `extract`
+Extract ML-ready features for a single image **or an entire directory (recursive)**.
+
+**Simple (single file; choose output format)**
+```bash
+volmemlyzer extract -i /cases/win10.raw -f csv
+```
+_Writes to `/cases/.volmemlyzer/features/win10.raw.csv` (outdir inferred), no parallelization in plugin runs, caching on._
+
+**Simple (directory, recursive)**
+```bash
+volmemlyzer extract -i /cases/ -f csv
+```
+_Writes **one features file per dump** under `/cases/.volmemlyzer/features/`._
+
+> Prefer a **single aggregated file** (one row per image)? Use the legacy compatibility shim `python main.py -f /cases -F csv`, which produces `<outdir>/features/output.csv`.
+
+**Complete (all key flags)**
+```bash
+volmemlyzer   --vol-path /opt/volatility3/vol.py -j 4   extract -i /cases/ -o /cases/.volmemlyzer -f csv  (--plugins pslist,malfind or --drop netscan) --no-cache
+```
+**Note that the drop and plugins should not be used together**
+
+Options:
+- `-i/--image` (required): **file or directory**. Directories are scanned for `*.vmem, *.raw, *.dmp, *.bin` recursively.  
+- `-o/--outdir`: artifacts directory (default near the image or directory)  
+- `-f/--format`: `json` or `csv` (required)  
+- `--plugins`: comma list to **restrict** extraction  
+- `--drop`: comma list to **exclude**  
+- `--no-cache`: ignore cached outputs  
+
+
+## Feature Catalog (Index)
+
+> The full enumerated list is long. Below is a compact index by category with representative examples. Each bullet maps to multiple concrete CSV columns.
+
+<details>
+<summary><b>System & OS</b></summary>
+
+- `info.Is64`, `info.winBuild`, `info.IsPAE`, `info.SystemTime`
+
+</details>
+
+<details>
+<summary><b>Processes, Threads & Trees</b></summary>
+
+- `pslist.nproc`, `pslist.avg_threads`, `pslist.wow64_ratio`, `pslist.zombie_count`  
+- `pstree.max_depth`, `pstree.avg_branching_factor`, `pstree.cross_session_edges`  
+- `threads.nThreads`, `threads.kernel_startaddr_ratio`
+
+</details>
+
+<details>
+<summary><b>Modules & DLL Loading</b></summary>
+
+- `dlllist.ndlls`, `dlllist.avg_dllPerProc`, `dlllist.maxLoadDelaySec`  
+- `ldrmodules.not_in_load`, `ldrmodules.memOnlyRatio`  
+- `modules.nModules`, `modules.largeModuleRatio`
+
+</details>
+
+<details>
+<summary><b>Handles (type mix & access patterns)</b></summary>
+
+- `handles.nHandles`, `handles.nTypeToken`, `handles.privHighAccessPct`, `handles.maxHandlesOneProc`
+
+</details>
+
+<details>
+<summary><b>Code Injection & VADs</b></summary>
+
+- `malfind.ninjections`, `malfind.RWXratio`, `malfind.maxVADsize`  
+- `vadinfo.exec_ratio`, `vadinfo.large_commit_count`, `vadwalk.max_vad_size`
+
+</details>
+
+<details>
+<summary><b>Kernel Callbacks, Drivers & Pools</b></summary>
+
+- `callbacks.ncallbacks`, `callbacks.distinctModules`, `callbacks.noSymbol`  
+- `bigpools.nAllocs`, `bigpools.nonPagedRatio`, `bigpools.tagEntropyMean`  
+- `unloaded.n_entries`, `unloaded.repeated_driver_ratio`
+
+</details>
+
+<details>
+<summary><b>Network & Sockets</b></summary>
+
+- `netscan.nConn`, `netscan.publicEstablished`, `netscan.duplicateListen`  
+- `netstat.nConn`, `netstat.nEstablished`
+
+</details>
+
+<details>
+<summary><b>Registry & Services</b></summary>
+
+- `registry.hivescan.orphan_offset_count`, `registry.hivelist.user_hive_count`  
+- `registry.certificates.disallowed_count`, `registry.userassist.avg_focus_count`  
+- `svclist.running_services_count`, `svcscan.Start_Auto`
+
+</details>
+
+<details>
+<summary><b>Command History & Consoles</b></summary>
+
+- `cmdline.urlInArgs`, `cmdline.scriptExec`, `cmdscan.maxCmds`  
+- `consoles.nConhost`, `consoles.histBufOverflow`, `consoles.dumpIoC`
+
+</details>
+
+<details>
+<summary><b>GUI Objects (Windows, Desktops, WindowStations)</b></summary>
+
+- `windows.total_window_objs`, `windows.null_title_ratio`, `windows.station_mismatch_count`  
+- `deskscan.uniqueDesktops`, `deskscan.session0GuiCount`  
+- `winsta.custom_station_count`, `winsta.service_station_ratio`
+
+</details>
+
+<details>
+<summary><b>Memory Mapping & Statistics</b></summary>
+
+- `virtmap.unused_size_ratio`, `virtmap.max_region_size_mb`, `virtmap.pagedpool_fragmentation`  
+- `statistics.invalid_page_ratio`, `statistics.swapped_page_count`
+
+</details>
+
+<details>
+<summary><b>Version Info / PE Metadata</b></summary>
+
+- `verinfo.valid_version_ratio`, `verinfo.dup_base_count`  
+- `amcache.future_compile_ratio`, `amcache.nonMicrosoftRatio`
+
+</details>
+
+> Need a full column list? See the `FEATURES.md`.
+
+---
+
+### `list`
+List available building blocks: **Volatility 3 plugins** and **extractor-backed plugins**.
+
+**Synopsis**
+```bash
+volmemlyzer list [--vol]/[--registry] [--grep STR] [--max N] [--json]
+```
+
+**Does**
+- `--vol` Show Volatility 3 plugin names (parsed from `vol.py -h` or `python -m volatility3 -h`).
+- `--registry` Show extractor-backed plugins in VolMemLyzer’s registry.
+- If neither flag is given, shows **both**.
+
+**Options**
+- `--grep STR` Case-insensitive substring filter.
+- `--max N` Limit items per list (`0` = unlimited).
+
+**Notes**
+- Pass `--vol-path` globally if `vol.py` isn’t on PATH. Exits `0` even when lists are empty.
+
+**Examples**
+```bash
+# Show both sources (default)
+volmemlyzer list
+
+# Only registry extractors
+volmemlyzer list --registry
+
+# All available volatility plugins
+volmemlyzer list --vol
+
+# Only Volatility plugins, filter all regisrtry-based plugins, cap output
+volmemlyzer list --vol --grep "windows.registry" --max 50
+
+```
+
+---
+
+## Python API
+
+> You can import individual layers in notebooks or other tools.
+
+### Build a pipeline
+```python
+from volmemlyzer.runner import VolRunner
+from volmemlyzer.extractor_registry import ExtractorRegistry
+from volmemlyzer.plugins import build_registry
+from volmemlyzer.pipeline import Pipeline
+
+runner = VolRunner(vol_path="/opt/volatility3/vol.py",
+                   default_renderer="json", default_timeout_s=600)
+registry: ExtractorRegistry = build_registry()
+pipe = Pipeline(runner, registry)
+```
+
+### Run plugins programmatically
+```python
+res = pipe.run_plugin_raw(
+    image_path="/cases/win10.raw",
+    enable={"pslist", "pstree"},
+    renderer="json",
+    outdir="/cases/.volmemlyzer",
+    concurrency=4,
+    use_cache=True,
+)
+print(res.artifacts["plugins"]["pslist"])  # → path to JSON output
+```
+
+### Extract one **FeatureRow**
+```python
+from dataclasses import asdict
+
+row = pipe.run_extract_features(
+    image_path="/cases/win10.raw",
+    enable={"pslist", "malfind"},
+    concurrency=4,
+    artifacts_dir="/cases/.volmemlyzer",
+    use_cache=True,
+)
+print(asdict(row))
+```
+
+### Drive the DFIR **analysis** steps
+```python
+from volmemlyzer.analysis import OverviewAnalysis
+
+analysis = OverviewAnalysis()
+summary = analysis.run_steps(
+    pipe=pipe,
+    image_path="/cases/win10.raw",
+    artifacts_dir="/cases/.volmemlyzer",
+    steps=[0,1,2,3,4,6],   # bearings → report
+    use_cache=True,
+    high_level=False,
+)
+# 'summary' is a dict you can also persist as JSON
+```
+
+---
+
+## Artifacts, formats & caching
+
+- **Artifacts directory**: defaults to `<imagebase>.artifacts/` created next to the image (or pass `-o/--outdir`).  
+- **File naming**: `<outdir>/<imagebase>_<plugin>.<ext>` and `<…>.stderr.txt` on errors.  
+- **Renderers**: `json | jsonl | csv | pretty | quick | none`.  
+- **Caching**: If an artifact already exists, VolMemLyzer will reuse it. Where supported, it will convert to the desired format to avoid rerunning the plugin; if not convertible, it will rerun with the requested renderer.  
+- **Features**: aggregated into **one file per run** under `<outdir>/features/` → `output.csv` or `output.json` (**one row per image**).
+
+> Tip: Prefer `json` for downstream extractors; it’s the most consistently supported by extractors.
+
+---
+
+## Performance tips
+
+- Increase `-j/--jobs` to match your CPU cores.  
+- Use `--no-cache` only when you genuinely need fresh plugin runs.  
+- Set `--timeout` to bound misbehaving plugins.
+
+---
+
+## Troubleshooting
+
+- **“Permission denied” writing artifacts**  
+  Ensure `-o/--outdir` points to a **directory** (not an existing file). VolMemLyzer will create `<outdir>` and `<outdir>/features/` as needed.
+
+- **vol.py not found / wrong Python**  
+  Use `--vol-path` (or `VOL_PATH`) to point at the actual `vol.py`. The Runner uses your current interpreter (`sys.executable`) to launch it.
+
+- **Weird paths on Windows**  
+  Quote paths with spaces. Both `C:\` and `\\?\` long paths work if your Python is configured for them.
+
+- **Renderer conversion**  
+  If a cached artifact isn’t convertible to the required format, VolMemLyzer will rerun that plugin with the requested renderer.
+
+---
+
+## Roadmap
+
+- More extractors (registry/artifacts/GUI objects)
+- Additional kernel and persistence checks in `analysis`
+- Optional HTML report backend
+- Unit tests and example datasets
+
+---
 
 ### License  
 This package is using [**Volatility**](https://github.com/volatilityfoundation/volatility) and following their LICENSE. 
@@ -386,11 +664,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
-For citation VolMemLyzer V2.0.0, in your works and also understanding it completely, you can find below published papers:
-
-
-
-For citation VolMemLyzer V1.0.0, in your works and also understanding it completely, you can find below published papers:
+For citation VolMemLyzer V1.0.0, V2.0.0, or V3.0.0 in your works and also understanding it completely, you can find below published papers:
 
 ```
 @INPROCEEDINGS{9452028,
@@ -404,13 +678,11 @@ For citation VolMemLyzer V1.0.0, in your works and also understanding it complet
   doi={10.1109/RDAAPS48126.2021.9452028}}
 ```
 
-
-
-### Team members 
+### Team Members 
 
 * [**Arash Habibi Lashkari:**](http://ahlashkari.com/index.asp) Founder and Project Owner
-* [**Yassin Dehfuli:**](https://github.com/YaCnDehfuli): Master Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V3.0.0) 
-* [**Abhay Pratap Singh:**](https://github.com/Abhay-Sengar): Undergraduate Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V2.0.0)
+* [**Yasin Dehfouli:**](https://github.com/YaCnDehfuli) Master Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V3.0.0) 
+* [**Abhay Pratap Singh:**](https://github.com/Abhay-Sengar) Undergraduate Student, Researcher and Developer (Python 3.0 - VolMemLyzer-V2.0.0)
 * [**Beiqi Li:**](https://github.com/beiqil) Undergraduate Student, Developer (Python 2.7 - VolMemLyzer V1.0.0)
 * [**Tristan Carrier:**](https://github.com/TristanCarrier) Master Student, Researcher, and developer (Python 2.7 - VolMemLyzer V1.0.0)
 * [**Gurdip Kaur:**](https://www.linkedin.com/in/gurdip-kaur-738062164/) Postdoctorall Fellow Researcher (Python 2.0 - VolMemLyzer V1.0.0)

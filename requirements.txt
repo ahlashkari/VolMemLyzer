@@ -1,0 +1,11 @@
+# Core runtime
+volatility3
+pandas>=2.0.0
+numpy>=1.24.0
+python-dateutil>=2.8.2
+tqdm>=4.65.0
+rich>=13.3.0
+
+# Optional (development)
+pytest>=7.4.0
+black>=24.4.0
