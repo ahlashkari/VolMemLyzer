@@ -1,3 +1,5 @@
+![](https://github.com/ahlashkari/VolMemLyzer/blob/main/bccc.jpg)
+
 # VolMemLyzer (Volatile Memory Analyzer)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-yellow.svg)](LICENSE)
@@ -404,6 +406,7 @@ Options:
 ## Feature Catalog (Index)
 
 > The full enumerated list is long. Below is a compact index by category with representative examples. Each bullet maps to multiple concrete CSV columns.
+> 
 
 <details>
 <summary><b>System & OS</b></summary>
