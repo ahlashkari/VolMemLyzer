@@ -406,7 +406,8 @@ Options:
 ## Feature Catalog (Index)
 
 > The full enumerated list is long. Below is a compact index by category with representative examples. Each bullet maps to multiple concrete CSV columns.
-> 
+>
+> ![](https://github.com/ahlashkari/VolMemLyzer/blob/main/Features.gif)
 
 <details>
 <summary><b>System & OS</b></summary>
